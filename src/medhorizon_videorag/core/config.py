@@ -10,6 +10,7 @@ import yaml
 @dataclass
 class ExperimentConfig:
     project: dict[str, Any] = field(default_factory=lambda: {"artifact_dir": "artifacts", "seed": 42})
+    data: dict[str, Any] = field(default_factory=dict)
     chunking: dict[str, Any] = field(default_factory=dict)
     vision: dict[str, Any] = field(default_factory=dict)
     retrieval: dict[str, Any] = field(default_factory=dict)

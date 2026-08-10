@@ -43,7 +43,8 @@ def main() -> None:
         chunker = VideoChunker(**config.chunking)
         chunks = []
         dataset = MedHorizonDataset(args.annotations)
-        video_root = Path(args.video_root) if args.video_root else None
+        configured_root = config.data.get("video_root")
+        video_root = Path(args.video_root or configured_root) if (args.video_root or configured_root) else None
         for video in dataset.iter_videos():
             path = video_root / video.video_path if video_root else Path(video.video_path)
             chunks.extend(chunker.chunk(video.key, str(path)))

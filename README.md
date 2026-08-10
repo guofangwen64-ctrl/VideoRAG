@@ -23,10 +23,9 @@ pip install -e '.[dev,video]'
 
 ```bash
 # 1. 生成视频片段清单（需安装 video 依赖）
-# 标注中例如 tmvp/087.mp4 会映射为 /mnt/medhorizon/videos/tmvp/087.mp4
-medrag chunk --config configs/baseline.yaml \
-  --annotations medhorizon_test.jsonl \
-  --video-root /mnt/medhorizon/videos
+# 先在 configs/baseline.yaml 的 data.video_root 中填写服务器视频根目录；
+# 标注中 tmvp/087.mp4 会映射为 ${video_root}/tmvp/087.mp4
+medrag chunk --config configs/baseline.yaml --annotations medhorizon_test.jsonl
 
 # 2. 建立特征与向量索引（默认 deterministic，适合管线验证）
 medrag index --config configs/baseline.yaml --chunks artifacts/chunks.jsonl
@@ -35,6 +34,8 @@ medrag index --config configs/baseline.yaml --chunks artifacts/chunks.jsonl
 medrag answer --config configs/baseline.yaml --annotations data/medhorizon/val.jsonl --output artifacts/predictions.jsonl
 medrag evaluate --predictions artifacts/predictions.jsonl
 ```
+
+也可用 `--video-root /path/to/videos` 临时覆盖配置，便于切换数据挂载点。
 
 ## 数据集分析
 
