@@ -23,7 +23,10 @@ pip install -e '.[dev,video]'
 
 ```bash
 # 1. 生成视频片段清单（需安装 video 依赖）
-medrag chunk --config configs/baseline.yaml --annotations data/medhorizon/train.jsonl
+# 标注中例如 tmvp/087.mp4 会映射为 /mnt/medhorizon/videos/tmvp/087.mp4
+medrag chunk --config configs/baseline.yaml \
+  --annotations medhorizon_test.jsonl \
+  --video-root /mnt/medhorizon/videos
 
 # 2. 建立特征与向量索引（默认 deterministic，适合管线验证）
 medrag index --config configs/baseline.yaml --chunks artifacts/chunks.jsonl

@@ -7,6 +7,7 @@ from pathlib import Path
 from medhorizon_videorag.core.config import load_config
 from medhorizon_videorag.core.io import read_jsonl, write_jsonl
 from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
+from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.evaluation import evaluate_predictions
 from medhorizon_videorag.ingestion import VideoChunker
 from medhorizon_videorag.pipelines import build_index, run_qa
@@ -20,6 +21,9 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--config", required=True)
     sub.choices["chunk"].add_argument("--annotations", required=True)
     sub.choices["chunk"].add_argument("--output", default="artifacts/chunks.jsonl")
+    sub.choices["chunk"].add_argument(
+        "--video-root", help="Directory containing paths referenced by MedHorizon video_path (for example /mnt/medhorizon/videos)",
+    )
     sub.choices["index"].add_argument("--chunks", required=True)
     sub.choices["answer"].add_argument("--annotations", required=True)
     sub.choices["answer"].add_argument("--output", required=True)
@@ -38,8 +42,11 @@ def main() -> None:
     if args.command == "chunk":
         chunker = VideoChunker(**config.chunking)
         chunks = []
-        for row in read_jsonl(args.annotations):
-            chunks.extend(chunker.chunk(row["video_id"], row["video_path"]))
+        dataset = MedHorizonDataset(args.annotations)
+        video_root = Path(args.video_root) if args.video_root else None
+        for video in dataset.iter_videos():
+            path = video_root / video.video_path if video_root else Path(video.video_path)
+            chunks.extend(chunker.chunk(video.key, str(path)))
         write_jsonl(args.output, (chunk.to_dict() for chunk in chunks))
         print(f"Wrote {len(chunks)} chunks to {args.output}")
     elif args.command == "index":
