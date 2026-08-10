@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medhorizon-videorag"
+version = "0.1.0"
+description = "Extensible VideoRAG baseline for MedHorizon long-video QA"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+video = ["opencv-python>=4.8"]
+models = ["openai>=1.0", "transformers>=4.40", "torch>=2.1", "Pillow>=10.0"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+medrag = "medhorizon_videorag.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

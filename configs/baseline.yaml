@@ -1,0 +1,21 @@
+project:
+  seed: 42
+  artifact_dir: artifacts
+chunking:
+  duration_seconds: 16.0
+  stride_seconds: 8.0
+  frames_per_chunk: 8
+vision:
+  provider: deterministic
+  embedding_dim: 256
+  # For a real baseline, use provider: hf_clip and set model_name, e.g.
+  # model_name: openai/clip-vit-base-patch32
+retrieval:
+  top_k: 5
+  index_path: artifacts/index
+llm:
+  provider: extractive
+  model: placeholder
+  max_context_chunks: 5
+evaluation:
+  normalize_text: true
