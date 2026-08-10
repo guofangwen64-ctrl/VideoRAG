@@ -33,6 +33,14 @@ medrag answer --config configs/baseline.yaml --annotations data/medhorizon/val.j
 medrag evaluate --predictions artifacts/predictions.jsonl
 ```
 
+## 数据集分析
+
+MedHorizon 的原始标注采用“每行一个视频、内嵌 QA 列表”的 JSONL 格式。可生成终端摘要和机器可读报告：
+
+```bash
+python experiments/analyze_dataset.py --annotations medhorizon_test.jsonl --output artifacts/dataset_report.json
+```
+
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
 
 ## 目录
