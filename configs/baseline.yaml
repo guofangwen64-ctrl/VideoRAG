@@ -3,7 +3,7 @@ project:
   artifact_dir: artifacts
 data:
   # Set this once on the server. JSONL video paths are resolved below it.
-  video_root: /mnt/medhorizon/videos
+  video_root: /media/pc3048/8e92fcae-9dcb-48b7-818b-82c5f8ed050e/aidata/GuoFangjin/MedHorizon_video/MedHorizon
 chunking:
   duration_seconds: 16.0
   stride_seconds: 8.0
