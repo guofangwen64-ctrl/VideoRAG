@@ -45,6 +45,16 @@ MedHorizon 的原始标注采用“每行一个视频、内嵌 QA 列表”的 J
 python experiments/analyze_dataset.py --annotations medhorizon_test.jsonl --output artifacts/dataset_report.json
 ```
 
+## 时间证据恢复
+
+公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。
+
+```bash
+python experiments/recover_temporal_ground_truth.py --annotations medhorizon_test.jsonl
+```
+
+默认输出为 `artifacts/recovered_temporal_evidence.jsonl` 和 `artifacts/temporal_recovery_report.json`。
+
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
 
 ## 目录
