@@ -9,8 +9,14 @@ from medhorizon_videorag.core.schemas import Chunk
 
 @dataclass
 class VideoChunker:
-    duration_seconds: float = 16.0
-    stride_seconds: float = 8.0
+    """Split a video into fixed temporal windows.
+
+    The baseline uses consecutive 30-second windows. The final window is kept
+    even when it is shorter, so no part of a video is discarded.
+    """
+
+    duration_seconds: float = 30.0
+    stride_seconds: float = 30.0
     frames_per_chunk: int = 8
 
     def chunk(self, video_id: str, video_path: str) -> list[Chunk]:
@@ -32,18 +38,24 @@ class VideoChunker:
         chunks_dir = source.parent / ".frames" / video_id
         chunks_dir.mkdir(parents=True, exist_ok=True)
         chunks: list[Chunk] = []
-        start = 0.0
-        index = 0
-        while start < total_seconds:
-            end = min(start + self.duration_seconds, total_seconds)
+        for index, (start, end) in enumerate(self.time_windows(total_seconds)):
             frame_paths = list(self._sample_frames(source, fps, start, end, index, chunks_dir))
             chunks.append(Chunk(
                 id=f"{video_id}_{index:05d}", video_id=video_id, video_path=str(source),
                 start_seconds=round(start, 3), end_seconds=round(end, 3), frame_paths=frame_paths,
             ))
-            index += 1
-            start += self.stride_seconds
         return chunks
+
+    def time_windows(self, total_seconds: float) -> Iterator[tuple[float, float]]:
+        """Yield chunk boundaries without decoding frames; useful for validation."""
+        if self.duration_seconds <= 0:
+            raise ValueError("duration_seconds must be greater than zero")
+        if self.stride_seconds <= 0:
+            raise ValueError("stride_seconds must be greater than zero")
+        start = 0.0
+        while start < total_seconds:
+            yield start, min(start + self.duration_seconds, total_seconds)
+            start += self.stride_seconds
 
     def _sample_frames(self, source: Path, fps: float, start: float, end: float, index: int, output_dir: Path) -> Iterator[str]:
         import cv2

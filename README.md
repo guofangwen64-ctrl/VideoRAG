@@ -23,6 +23,7 @@ pip install -e '.[dev,video]'
 
 ```bash
 # 1. 生成视频片段清单（需安装 video 依赖）
+# baseline 使用不重叠的固定 30 秒窗口，最后不足 30 秒的片段也会保留。
 # 先在 configs/baseline.yaml 的 data.video_root 中填写服务器视频根目录；
 # 标注中 tmvp/087.mp4 会映射为 ${video_root}/tmvp/087.mp4
 medrag chunk --config configs/baseline.yaml --annotations medhorizon_test.jsonl

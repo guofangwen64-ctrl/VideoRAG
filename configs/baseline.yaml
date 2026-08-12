@@ -5,8 +5,9 @@ data:
   # Set this once on the server. JSONL video paths are resolved below it.
   video_root: /media/pc3048/8e92fcae-9dcb-48b7-818b-82c5f8ed050e/aidata/GuoFangjin/MedHorizon_video/MedHorizon
 chunking:
-  duration_seconds: 16.0
-  stride_seconds: 8.0
+  # Consecutive fixed windows; the final shorter tail window is retained.
+  duration_seconds: 30.0
+  stride_seconds: 30.0
   frames_per_chunk: 8
 vision:
   provider: deterministic
