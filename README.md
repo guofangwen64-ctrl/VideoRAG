@@ -38,6 +38,8 @@ medrag evaluate --predictions artifacts/predictions.jsonl
 
 也可用 `--video-root /path/to/videos` 临时覆盖配置，便于切换数据挂载点。
 
+切片器对每个视频只解码一次并顺序抽帧，采样帧写入 `artifacts/frames/<video_key>/`，不会修改原始视频。`artifacts/chunks.jsonl` 会在每个视频完成后立即追加；中断后以相同命令重跑会跳过已完成视频。无法打开或解码的视频会记录到 `artifacts/chunk_errors.jsonl`，其余视频继续处理。若明确需要全量重跑，添加 `--restart`。
+
 ## 数据集分析
 
 MedHorizon 的原始标注采用“每行一个视频、内嵌 QA 列表”的 JSONL 格式。可生成终端摘要和机器可读报告：
