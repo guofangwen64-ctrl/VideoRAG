@@ -11,7 +11,7 @@ dependencies = ["numpy>=1.24", "PyYAML>=6.0"]
 
 [project.optional-dependencies]
 video = ["opencv-python>=4.8"]
-models = ["openai>=1.0", "transformers>=4.40", "torch>=2.1", "Pillow>=10.0"]
+models = ["openai>=1.0", "transformers>=4.48", "torch>=2.1", "Pillow>=10.0", "open_clip_torch>=2.26"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]

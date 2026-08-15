@@ -12,10 +12,12 @@ chunking:
   # Retry badly decoded videos through FFmpeg when this fraction of chunks is incomplete.
   ffmpeg_fallback_min_incomplete_ratio: 0.1
 vision:
-  provider: deterministic
-  embedding_dim: 256
-  # For a real baseline, use provider: hf_clip and set model_name, e.g.
-  # model_name: openai/clip-vit-base-patch32
+  # Experiment 1: general-domain primary baseline.
+  provider: openai_clip
+  model_name: ViT-B-32
+  pretrained: openai
+  device: cuda
+  batch_size: 32
 retrieval:
   top_k: 5
   index_path: artifacts/index

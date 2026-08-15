@@ -9,6 +9,12 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev,video]'
 ```
 
+要运行真实视觉检索编码器，请安装模型依赖：
+
+```bash
+pip install -e '.[models]'
+```
+
 ## 数据约定
 
 标注为 JSONL，每行：
@@ -69,6 +75,31 @@ python experiments/recover_temporal_ground_truth.py --annotations medhorizon_tes
 默认输出为 `artifacts/recovered_temporal_evidence.jsonl` 和 `artifacts/temporal_recovery_report.json`。
 
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
+
+## 视觉编码器实验顺序
+
+编码器对每个 chunk 的帧独立编码，先 L2 归一化，再均值池化和再次归一化；题目使用同一模型的文本编码器，因此可进行余弦相似度检索。
+
+1. 默认的 `openai_clip`：OpenAI CLIP ViT-B/32，通用图文检索基线。
+2. `biomed_clip`：医学/生物医学图文预训练对照。
+3. `siglip2`：更强的通用图文检索对照；NaFlex 变体保留原始宽高比。
+
+切换编码器只需替换 `configs/baseline.yaml` 的 `vision` 块：
+
+```yaml
+# Experiment 2
+vision:
+  provider: biomed_clip
+  device: cuda
+  batch_size: 32
+
+# Experiment 3
+vision:
+  provider: siglip2
+  model_name: google/siglip2-base-patch16-naflex
+  device: cuda
+  batch_size: 16
+```
 
 ## 目录
 
