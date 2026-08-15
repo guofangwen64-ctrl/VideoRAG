@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--annotations", default="medhorizon_test.jsonl")
     parser.add_argument("--index", help="Override retrieval.index_path from the config")
     parser.add_argument("--name", default="visual_index", help="Experiment name recorded in the report")
+    parser.add_argument("--scope", choices=["intra_video", "global"], default="intra_video", help="Restrict retrieval to the QA's source video, or search every video")
     parser.add_argument("--top-k", default="1,4,8", help="Comma-separated retrieval cutoffs")
     parser.add_argument("--iou-threshold", type=float, default=0.3)
     parser.add_argument("--output", default="artifacts/retrieval_report.json")
@@ -49,11 +50,14 @@ def main() -> None:
         iterator = tqdm(zip(evidence, query_vectors, strict=True), total=len(evidence), desc="Evaluating retrieval", unit="question")
     except ImportError:
         iterator = zip(evidence, query_vectors, strict=True)
-    results = [index.search(vector, max(top_ks)) for _, vector in iterator]
+    results = [
+        index.search(vector, max(top_ks), video_id=item.video_key if args.scope == "intra_video" else None)
+        for item, vector in iterator
+    ]
     report, details = evaluate_retrieval(evidence, results, top_ks, args.iou_threshold)
     report.update({
         "experiment": args.name, "index_path": str(index_path), "encoder": config.vision,
-        "indexed_chunks": len(index.chunks), "annotations": args.annotations,
+        "indexed_chunks": len(index.chunks), "annotations": args.annotations, "scope": args.scope,
     })
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
