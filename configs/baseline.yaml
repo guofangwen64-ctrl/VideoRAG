@@ -18,6 +18,15 @@ vision:
   pretrained: openai
   device: cuda
   batch_size: 32
+# vision:
+#   provider: biomed_clip
+#   device: cuda
+#   batch_size: 32
+# vision:
+#   provider: siglip2
+#   model_name: google/siglip2-base-patch16-naflex
+#   device: cuda
+#   batch_size: 16
 retrieval:
   top_k: 5
   index_path: artifacts/index
