@@ -6,15 +6,24 @@ from typing import Sequence
 from medhorizon_videorag.core.config import ExperimentConfig
 from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
 from medhorizon_videorag.features import build_visual_embedder
+from medhorizon_videorag.features.utils import chunks_with_existing_frames
 from medhorizon_videorag.generation import ExtractiveGenerator
 from medhorizon_videorag.retrieval import NumpyVectorIndex, VideoRetriever
 
 
 def build_index(chunks: Sequence[Chunk], config: ExperimentConfig) -> NumpyVectorIndex:
     encoder = build_visual_embedder(config.vision)
+    chunks, skipped = chunks_with_existing_frames(chunks)
+    if not chunks:
+        raise ValueError("No chunks with decodable frames are available for indexing")
     index = NumpyVectorIndex()
     index.add(chunks, encoder.embed_chunks(chunks))
-    index.save(Path(config.retrieval["index_path"]))
+    index_path = Path(config.retrieval["index_path"])
+    index.save(index_path)
+    if skipped:
+        from medhorizon_videorag.core.io import write_jsonl
+        write_jsonl(index_path / "skipped_chunks.jsonl", skipped)
+        print(f"Skipped {len(skipped)} chunks with no usable frame; audit: {index_path / 'skipped_chunks.jsonl'}")
     return index
 
 

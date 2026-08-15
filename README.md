@@ -101,6 +101,8 @@ vision:
   batch_size: 16
 ```
 
+编码时显示帧级进度条。视觉向量只为至少有一张实际存在的采样帧的 chunk 建立；零帧 chunk 会跳过并记录到 `<index_path>/skipped_chunks.jsonl`，不会中断全量索引。`batch_size` 是跨 chunk 的实际 GPU 帧批量，A6000 可从 256 开始；若 CUDA out-of-memory，依次降为 128、64。
+
 ## 目录
 
 ```text

@@ -38,7 +38,7 @@ class SigLIP2VisualEmbedder:
         return np.vstack(outputs)
 
     def embed_chunks(self, chunks: Sequence[Chunk]) -> np.ndarray:
-        return embed_and_pool_chunks(chunks, self._embed_images, self.embedding_dim)
+        return embed_and_pool_chunks(chunks, self._embed_images, self.embedding_dim, self.batch_size, "Encoding SigLIP2")
 
     def embed_text(self, texts: Sequence[str]) -> np.ndarray:
         outputs = []
