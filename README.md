@@ -74,6 +74,20 @@ python experiments/recover_temporal_ground_truth.py --annotations medhorizon_tes
 
 默认输出为 `artifacts/recovered_temporal_evidence.jsonl` 和 `artifacts/temporal_recovery_report.json`。
 
+## 检索评估
+
+使用题干中恢复出的高置信时间区间和时间点，评估视觉索引的 `Recall@K`、最佳时间 IoU 和 Point Hit@K。区间评估默认采用 `IoU ≥ 0.3`：30 秒 chunk 对 60 秒目标区间的最大 IoU 通常为 0.5。
+
+```bash
+python experiments/evaluate_retrieval.py \
+  --config configs/baseline.yaml \
+  --annotations medhorizon_test.jsonl \
+  --index artifacts/index \
+  --name openai_clip \
+  --output artifacts/retrieval_openai_clip.json \
+  --details artifacts/retrieval_openai_clip_details.jsonl
+```
+
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
 
 ## 视觉编码器实验顺序
