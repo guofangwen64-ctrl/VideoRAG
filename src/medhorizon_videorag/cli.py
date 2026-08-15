@@ -13,6 +13,18 @@ from medhorizon_videorag.ingestion import VideoChunker
 from medhorizon_videorag.pipelines import build_index, run_qa
 
 
+def _retry_video_ids(path: str | Path, minimum_ratio: float) -> set[str]:
+    selected: set[str] = set()
+    for row in read_jsonl(path):
+        if "error" in row:
+            selected.add(str(row["video_id"]))
+        elif row.get("warning") == "incomplete_frame_decode":
+            ratio = row["incomplete_chunks"] / max(1, row["total_chunks"])
+            if ratio >= minimum_ratio:
+                selected.add(str(row["video_id"]))
+    return selected
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="medrag")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -24,6 +36,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.choices["chunk"].add_argument("--frame-root", help="Directory for sampled frames (default: <artifact_dir>/frames)")
     sub.choices["chunk"].add_argument("--errors", help="Path for failed-video JSONL records (default: <artifact_dir>/chunk_errors.jsonl)")
     sub.choices["chunk"].add_argument("--restart", action="store_true", help="Discard existing chunk manifest and process every video again")
+    sub.choices["chunk"].add_argument("--retry-errors", help="Retry failed/severely incomplete videos recorded in this JSONL")
+    sub.choices["chunk"].add_argument("--retry-min-incomplete-ratio", type=float, default=0.1, help="Retry warning records at or above this incomplete-chunk ratio")
     sub.choices["chunk"].add_argument(
         "--video-root", help="Directory containing paths referenced by MedHorizon video_path (for example /mnt/medhorizon/videos)",
     )
@@ -43,7 +57,7 @@ def main() -> None:
         return
     config = load_config(args.config)
     if args.command == "chunk":
-        chunker = VideoChunker(**config.chunking)
+        chunker = VideoChunker(**{name: config.chunking[name] for name in ("duration_seconds", "stride_seconds", "frames_per_chunk") if name in config.chunking})
         dataset = MedHorizonDataset(args.annotations)
         configured_root = config.data.get("video_root")
         video_root = Path(args.video_root or configured_root) if (args.video_root or configured_root) else None
@@ -51,28 +65,43 @@ def main() -> None:
         output = Path(args.output)
         frame_root = Path(args.frame_root) if args.frame_root else artifact_dir / "frames"
         errors = Path(args.errors) if args.errors else artifact_dir / "chunk_errors.jsonl"
+        if args.restart and args.retry_errors:
+            raise ValueError("--restart and --retry-errors cannot be used together")
         if args.restart and output.exists():
             output.unlink()
-        completed = {row["video_id"] for row in read_jsonl(output)} if output.exists() else set()
+        existing_rows = read_jsonl(output) if output.exists() else []
+        retry_ids = _retry_video_ids(args.retry_errors, args.retry_min_incomplete_ratio) if args.retry_errors else set()
+        completed = {row["video_id"] for row in existing_rows} if not retry_ids else set()
+        if retry_ids:
+            print(f"Retrying {len(retry_ids)} videos from {args.retry_errors}", flush=True)
         output.parent.mkdir(parents=True, exist_ok=True)
         errors.parent.mkdir(parents=True, exist_ok=True)
         processed = failed = written = 0
+        replacements: dict[str, list[Chunk]] = {}
         with output.open("a", encoding="utf-8") as manifest, errors.open("a", encoding="utf-8") as error_log:
             for number, video in enumerate(dataset.iter_videos(), start=1):
+                if retry_ids and video.key not in retry_ids:
+                    continue
                 if video.key in completed:
                     continue
                 processed += 1
                 path = video_root / video.video_path if video_root else Path(video.video_path)
                 try:
-                    chunks = chunker.chunk(video.key, str(path), frame_root)
+                    chunks = chunker.chunk(
+                        video.key, str(path), frame_root,
+                        config.chunking.get("ffmpeg_fallback_min_incomplete_ratio"),
+                    )
                 except (OSError, ValueError, RuntimeError) as error:
                     failed += 1
                     error_log.write(json.dumps({"video_id": video.key, "video_path": str(path), "error": str(error)}, ensure_ascii=False) + "\n")
                     print(f"[{number}/{len(dataset.videos)}] FAILED {video.key}: {error}", flush=True)
                     continue
-                for chunk in chunks:
-                    manifest.write(json.dumps(chunk.to_dict(), ensure_ascii=False) + "\n")
-                manifest.flush()
+                if retry_ids:
+                    replacements[video.key] = chunks
+                else:
+                    for chunk in chunks:
+                        manifest.write(json.dumps(chunk.to_dict(), ensure_ascii=False) + "\n")
+                    manifest.flush()
                 written += len(chunks)
                 incomplete = sum(len(chunk.frame_paths) < max(1, chunker.frames_per_chunk) for chunk in chunks)
                 if incomplete:
@@ -83,6 +112,17 @@ def main() -> None:
                     error_log.flush()
                 suffix = f", {incomplete} incomplete" if incomplete else ""
                 print(f"[{number}/{len(dataset.videos)}] {video.key}: {len(chunks)} chunks{suffix}", flush=True)
+        if retry_ids and replacements:
+            temporary_manifest = output.with_name(output.name + ".retry-tmp")
+            with temporary_manifest.open("w", encoding="utf-8") as handle:
+                for row in existing_rows:
+                    if row["video_id"] not in replacements:
+                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                for chunks in replacements.values():
+                    for chunk in chunks:
+                        handle.write(json.dumps(chunk.to_dict(), ensure_ascii=False) + "\n")
+            temporary_manifest.replace(output)
+            print(f"Replaced manifest records for {len(replacements)} successfully retried videos.")
         print(f"Finished: {processed} processed, {written} chunks written, {failed} failed. Manifest: {output}")
     elif args.command == "index":
         chunks = [Chunk(**row) for row in read_jsonl(args.chunks)]

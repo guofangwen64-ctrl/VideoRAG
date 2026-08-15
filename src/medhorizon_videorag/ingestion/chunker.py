@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Iterator
 
 from medhorizon_videorag.core.schemas import Chunk
@@ -15,7 +17,10 @@ class VideoChunker:
     stride_seconds: float = 30.0
     frames_per_chunk: int = 8
 
-    def chunk(self, video_id: str, video_path: str, frame_root: str | Path) -> list[Chunk]:
+    def chunk(
+        self, video_id: str, video_path: str, frame_root: str | Path,
+        ffmpeg_fallback_min_incomplete_ratio: float | None = None,
+    ) -> list[Chunk]:
         """Decode a video once, sampling frames without random seeks.
 
         A chunk is emitted even if a damaged stream prevents some frames from
@@ -45,11 +50,22 @@ class VideoChunker:
         finally:
             capture.release()
 
+        incomplete_ratio = sum(len(paths) < max(1, self.frames_per_chunk) for paths in sampled_paths) / len(windows)
+        decoder = "opencv"
+        if ffmpeg_fallback_min_incomplete_ratio is not None and incomplete_ratio >= ffmpeg_fallback_min_incomplete_ratio:
+            fallback_paths = self._ffmpeg_sample(source, windows, output_dir)
+            fallback_ratio = sum(len(paths) < max(1, self.frames_per_chunk) for paths in fallback_paths) / len(windows)
+            if fallback_ratio < incomplete_ratio:
+                sampled_paths, incomplete_ratio, decoder = fallback_paths, fallback_ratio, "ffmpeg"
+
         return [Chunk(
             id=f"{video_id}_{index:05d}", video_id=video_id, video_path=str(source),
             start_seconds=round(start, 3), end_seconds=round(end, 3),
             frame_paths=sampled_paths[index],
-            metadata={"expected_frames": max(1, self.frames_per_chunk), "decoded_frames": len(sampled_paths[index])},
+            metadata={
+                "expected_frames": max(1, self.frames_per_chunk), "decoded_frames": len(sampled_paths[index]),
+                "decoder": decoder,
+            },
         ) for index, (start, end) in enumerate(windows)]
 
     def time_windows(self, total_seconds: float) -> Iterator[tuple[float, float]]:
@@ -92,3 +108,41 @@ class VideoChunker:
                     paths[chunk_index].append(str(destination))
             frame_number += 1
         return paths
+
+    def _ffmpeg_sample(
+        self, source: Path, windows: list[tuple[float, float]], output_dir: Path
+    ) -> list[list[str]]:
+        """Fallback for streams OpenCV cannot fully decode.
+
+        FFmpeg decodes the complete stream once at a fixed sampling rate. It is
+        intentionally used only for severely incomplete OpenCV results.
+        """
+        sample_count = max(1, self.frames_per_chunk)
+        temporary = output_dir.parent / f".{output_dir.name}.ffmpeg-tmp"
+        shutil.rmtree(temporary, ignore_errors=True)
+        temporary.mkdir(parents=True, exist_ok=True)
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-nostdin", "-v", "error", "-i", str(source), "-an",
+                    "-vf", f"fps={sample_count / self.duration_seconds}", "-q:v", "2",
+                    str(temporary / "%08d.jpg"),
+                ],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            frame_files = sorted(temporary.glob("*.jpg"))
+            if result.returncode != 0 and not frame_files:
+                return [[] for _ in windows]
+            paths: list[list[str]] = [[] for _ in windows]
+            for index, frame in enumerate(frame_files):
+                chunk_index, sample_index = divmod(index, sample_count)
+                if chunk_index >= len(windows):
+                    break
+                destination = output_dir / f"{chunk_index:05d}_{sample_index:02d}.jpg"
+                shutil.move(str(frame), destination)
+                paths[chunk_index].append(str(destination))
+            return paths
+        except FileNotFoundError:
+            return [[] for _ in windows]
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)

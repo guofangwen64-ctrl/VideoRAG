@@ -40,6 +40,16 @@ medrag evaluate --predictions artifacts/predictions.jsonl
 
 切片器对每个视频只解码一次并顺序抽帧，采样帧写入 `artifacts/frames/<video_key>/`，不会修改原始视频。`artifacts/chunks.jsonl` 会在每个视频完成后立即追加；中断后以相同命令重跑会跳过已完成视频。无法打开或解码的视频会记录到 `artifacts/chunk_errors.jsonl`，其余视频继续处理。若明确需要全量重跑，添加 `--restart`。
 
+对已记录的失败或严重缺帧视频，可使用 FFmpeg 后备解码并只替换这些视频的 manifest 记录（默认仅重试缺帧比例至少 10% 的视频）：
+
+```bash
+medrag chunk --config configs/baseline.yaml --annotations medhorizon_test.jsonl \
+  --retry-errors artifacts/chunk_errors.jsonl \
+  --errors artifacts/chunk_errors_retry.jsonl
+```
+
+重试期间旧 manifest 保持不变；仅成功重试的视频会在结束时被替换。`--retry-min-incomplete-ratio 0` 可选择所有曾有缺帧告警的视频。
+
 ## 数据集分析
 
 MedHorizon 的原始标注采用“每行一个视频、内嵌 QA 列表”的 JSONL 格式。可生成终端摘要和机器可读报告：

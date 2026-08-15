@@ -9,6 +9,8 @@ chunking:
   duration_seconds: 30.0
   stride_seconds: 30.0
   frames_per_chunk: 8
+  # Retry badly decoded videos through FFmpeg when this fraction of chunks is incomplete.
+  ffmpeg_fallback_min_incomplete_ratio: 0.1
 vision:
   provider: deterministic
   embedding_dim: 256
