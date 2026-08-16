@@ -99,6 +99,21 @@ python experiments/evaluate_retrieval.py --config configs/baseline.yaml \
   --details artifacts/retrieval_hybrid_openai_details.jsonl
 ```
 
+对于“改写后题干没有时间、但 `question_original` 等旧字段包含时间”的题，可运行单独的
+**original-question oracle**。它只替换检索输入为产生 GT 的原始字段；时间 GT、索引和指标不变，
+因此只能作为时间路由的上限诊断，不能和真实部署结果混合报告。
+
+```bash
+python experiments/evaluate_retrieval.py --config configs/baseline.yaml \
+  --annotations medhorizon_test.jsonl --index artifacts/index_openai \
+  --name hybrid_original_question_oracle --retriever hybrid \
+  --query-source evidence_source --subset rewritten_time_missing \
+  --output artifacts/retrieval_hybrid_oracle_127.json \
+  --details artifacts/retrieval_hybrid_oracle_127_details.jsonl
+```
+
+报告中的 `query_source: evidence_source` 和 `subset: rewritten_time_missing` 用于标识该 oracle 条件。
+
 ## 混合检索路由
 
 `HybridRetriever` 会优先解析题干中的明确时间范围或时间点，并按 chunk 元数据确定性返回重叠片段；没有时间表达的问题才加载视觉编码器并在所属视频内检索。可单独验证路由，无需启动 CLIP 来处理时间题：

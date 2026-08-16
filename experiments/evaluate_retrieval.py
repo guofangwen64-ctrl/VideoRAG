@@ -18,6 +18,17 @@ from medhorizon_videorag.features import build_visual_embedder  # noqa: E402
 from medhorizon_videorag.retrieval import HybridRetriever, NumpyVectorIndex, TemporalRetriever, VisualRetriever  # noqa: E402
 
 
+def query_text(item, dataset: MedHorizonDataset, query_source: str) -> str:
+    """Return the deployed question or the annotation field that supplied GT."""
+    if query_source == "rewritten" or item.source_field in {None, "question"}:
+        return item.question or ""
+    qa = next(question for question in dataset.questions if question.uid == item.qa_uid)
+    value = qa.metadata.get(item.source_field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"QA {item.qa_uid} has no usable {item.source_field!r} query text")
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="Encoder configuration used to build the index")
@@ -25,6 +36,14 @@ def main() -> None:
     parser.add_argument("--index", help="Override retrieval.index_path from the config")
     parser.add_argument("--name", default="visual_index", help="Experiment name recorded in the report")
     parser.add_argument("--retriever", choices=["visual", "hybrid"], default="visual", help="Use pure visual search or automatic temporal/visual routing")
+    parser.add_argument(
+        "--query-source", choices=["rewritten", "evidence_source"], default="rewritten",
+        help="Use the deployed rewritten question, or the annotation field that supplied temporal GT (oracle only)",
+    )
+    parser.add_argument(
+        "--subset", choices=["all", "rewritten_time_missing"], default="all",
+        help="Evaluate all direct-GT questions, or only questions whose time is absent from the rewritten question",
+    )
     parser.add_argument("--scope", choices=["intra_video", "global"], default="intra_video", help="Restrict retrieval to the QA's source video, or search every video")
     parser.add_argument("--top-k", default="1,4,8", help="Comma-separated retrieval cutoffs")
     parser.add_argument("--iou-threshold", type=float, default=0.3)
@@ -38,10 +57,14 @@ def main() -> None:
     config = load_config(args.config)
     index_path = Path(args.index or config.retrieval["index_path"])
     index = NumpyVectorIndex.load(index_path)
+    dataset = MedHorizonDataset(args.annotations)
     evidence = [
-        item for item in recover_evidence(MedHorizonDataset(args.annotations))
+        item for item in recover_evidence(dataset)
         if item.method in {"direct_range", "direct_point"}
     ]
+    if args.subset == "rewritten_time_missing":
+        evidence = [item for item in evidence if item.source_field not in {None, "question"}]
+    queries = [query_text(item, dataset, args.query_source) for item in evidence]
     routes: Counter[str] = Counter()
     try:
         from tqdm.auto import tqdm
@@ -54,14 +77,13 @@ def main() -> None:
             visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
         )
         results = []
-        for item in iterator:
-            response = retriever.retrieve(item.question or "", item.video_key, max(top_ks))
+        for item, query in zip(iterator, queries, strict=True):
+            response = retriever.retrieve(query, item.video_key, max(top_ks))
             routes[response.route] += 1
             results.append(response.results)
     else:
         encoder = build_visual_embedder(config.vision)
-        questions = [item.question or "" for item in evidence]
-        query_vectors = encoder.embed_text(questions)
+        query_vectors = encoder.embed_text(queries)
         if query_vectors.shape[1] != index.vectors.shape[1]:
             raise ValueError(f"Embedding dimensions differ: query={query_vectors.shape[1]}, index={index.vectors.shape[1]}")
         results = []
@@ -73,6 +95,7 @@ def main() -> None:
         "experiment": args.name, "index_path": str(index_path), "encoder": config.vision,
         "indexed_chunks": len(index.chunks), "annotations": args.annotations, "scope": args.scope,
         "retriever": args.retriever, "route_counts": dict(sorted(routes.items())),
+        "query_source": args.query_source, "subset": args.subset,
     })
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
