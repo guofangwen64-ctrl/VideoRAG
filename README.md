@@ -90,6 +90,15 @@ python experiments/evaluate_retrieval.py \
 
 默认 `--scope intra_video`：每道 MedHorizon QA 已给定源视频，因此只在该视频的 chunks 中检索，这是主实验设置。`--scope global` 可作为跨视频检索的困难对照，但不能与视频内指标混合比较。
 
+要验证完整时间/视觉路由而非纯 CLIP 检索，添加 `--retriever hybrid`。显式时间题会走确定性的 `TemporalRetriever`；没有时间表达时才实例化视觉编码器。
+
+```bash
+python experiments/evaluate_retrieval.py --config configs/baseline.yaml \
+  --index artifacts/index_openai --name hybrid_openai --retriever hybrid \
+  --output artifacts/retrieval_hybrid_openai.json \
+  --details artifacts/retrieval_hybrid_openai_details.jsonl
+```
+
 ## 混合检索路由
 
 `HybridRetriever` 会优先解析题干中的明确时间范围或时间点，并按 chunk 元数据确定性返回重叠片段；没有时间表达的问题才加载视觉编码器并在所属视频内检索。可单独验证路由，无需启动 CLIP 来处理时间题：
