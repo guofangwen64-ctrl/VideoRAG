@@ -4,11 +4,11 @@ set -euo pipefail
 
 python -m pip uninstall -y vllm torch torchvision torchaudio
 python -m pip install --upgrade pip
-# vLLM 0.6.6.post1 ships CUDA-12.1 binaries and supports Qwen2.5-VL.
+# vLLM 0.7.3 ships CUDA-12.1 binaries and natively supports Qwen2.5-VL.
 # The extra index makes pip resolve torch==2.5.1 to its +cu121 wheel.
 python -m pip install --upgrade --force-reinstall \
   --extra-index-url https://download.pytorch.org/whl/cu121 \
-  'vllm==0.6.6.post1'
+  'vllm==0.7.3'
 
 python - <<'PY'
 import torch
