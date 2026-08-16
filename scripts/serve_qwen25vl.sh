@@ -12,4 +12,4 @@ exec vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
   --dtype bfloat16 \
   --gpu-memory-utilization "$VLM_GPU_MEMORY_UTILIZATION" \
   --max-model-len 8192 \
-  --limit-mm-per-prompt '{"image":16}'
+  --limit-mm-per-prompt image=16
