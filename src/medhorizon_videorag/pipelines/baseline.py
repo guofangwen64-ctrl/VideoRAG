@@ -7,7 +7,9 @@ from medhorizon_videorag.core.config import ExperimentConfig
 from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
 from medhorizon_videorag.features import build_visual_embedder
 from medhorizon_videorag.features.utils import chunks_with_existing_frames
-from medhorizon_videorag.generation import ExtractiveGenerator
+from medhorizon_videorag.datasets import MedHorizonQA
+from medhorizon_videorag.generation import ExtractiveGenerator, build_video_reader
+from medhorizon_videorag.ingestion import FineFrameExtractor
 from medhorizon_videorag.retrieval import HybridRetriever, NumpyVectorIndex, TemporalRetriever, VisualRetriever
 
 
@@ -50,4 +52,46 @@ def run_qa(examples: Sequence[QAExample], config: ExperimentConfig) -> list[Pred
             ],
             reference=item.answer,
         ))
+    return predictions
+
+
+def run_medhorizon_qa(
+    examples: Sequence[MedHorizonQA], config: ExperimentConfig, *, limit: int | None = None,
+    top_k: int | None = None, reader_frame_root: str | Path | None = None,
+) -> list[Prediction]:
+    """Run retrieval, on-demand dense sampling, and a multiple-choice VLM reader."""
+    index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
+    retriever = HybridRetriever(
+        TemporalRetriever(index),
+        visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
+    )
+    selected = list(examples[:limit] if limit is not None else examples)
+    effective_top_k = top_k or int(config.retrieval.get("top_k", 5))
+    artifact_dir = Path(config.project.get("artifact_dir", "artifacts"))
+    reader_config = config.llm
+    extractor = FineFrameExtractor(
+        reader_frame_root or artifact_dir / "reader_frames",
+        int(reader_config.get("frames_per_chunk", 16)),
+    )
+    reader = build_video_reader(reader_config)
+    predictions: list[Prediction] = []
+    for number, item in enumerate(selected, start=1):
+        response = retriever.retrieve(item.question, item.video_key, effective_top_k)
+        evidence: list[dict] = []
+        for hit in response.results:
+            frames = extractor.extract(hit.chunk)
+            evidence.append({
+                "chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
+                "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route,
+                "reader_frame_paths": frames,
+            })
+        answer = reader.answer(item.question, item.options, evidence)
+        predictions.append(Prediction(
+            id=str(item.uid), question=item.question, prediction=answer.choice, reference=item.answer,
+            evidence=evidence, metadata={
+                "task_name": item.task_name, "task_id": item.task_id, "route": response.route,
+                "reader_provider": reader_config.get("provider", "mock"), "rationale": answer.rationale,
+            },
+        ))
+        print(f"[{number}/{len(selected)}] {item.uid}: {response.route} -> {answer.choice}", flush=True)
     return predictions

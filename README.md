@@ -123,6 +123,38 @@ medrag retrieve --config configs/baseline.yaml --video-id multibypass_SBP12 \
   --question "What happened from 1:09:18 to 1:10:18?" --top-k 4
 ```
 
+## 检索后回答（Reader）
+
+`medrag answer` 会读取 MedHorizon 的嵌套 QA 标注，先走 HybridRetriever；再仅对命中的 Top-K
+chunk 从原视频密集抽帧（默认每个 chunk 16 帧）并缓存到 `artifacts/reader_frames/`，最后交给
+可替换的多选题 Reader。索引阶段的 30 秒 8 帧不会被修改，也不需要重建索引。
+
+先用离线 `mock` Reader 验证数据路径、FFmpeg 和输出格式：
+
+```bash
+medrag answer --config configs/baseline.yaml --annotations medhorizon_test.jsonl \
+  --limit 10 --output artifacts/qa_mock_10.jsonl
+
+python experiments/evaluate_qa.py --predictions artifacts/qa_mock_10.jsonl \
+  --output artifacts/qa_mock_10_report.json
+```
+
+`mock` 固定选择第一个选项，因此它只用于冒烟测试，不能作为模型结果。使用 OpenAI 或本地
+OpenAI-compatible VLM 时，在另一个配置文件中设置：
+
+```yaml
+llm:
+  provider: openai_compatible
+  model: <your-vlm-model>
+  api_key_env: OPENAI_API_KEY
+  # base_url: http://your-vllm-server/v1  # 本地 vLLM 等兼容服务时设置
+  frames_per_chunk: 16
+```
+
+然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
+Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
+多选准确率。
+
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
 
 ## 视觉编码器实验顺序

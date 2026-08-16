@@ -10,7 +10,7 @@ from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
 from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.evaluation import evaluate_predictions
 from medhorizon_videorag.ingestion import VideoChunker
-from medhorizon_videorag.pipelines import build_index, run_qa
+from medhorizon_videorag.pipelines import build_index, run_medhorizon_qa
 from medhorizon_videorag.retrieval import HybridRetriever, NumpyVectorIndex, TemporalRetriever, VisualRetriever
 from medhorizon_videorag.features import build_visual_embedder
 
@@ -46,6 +46,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.choices["index"].add_argument("--chunks", required=True)
     sub.choices["answer"].add_argument("--annotations", required=True)
     sub.choices["answer"].add_argument("--output", required=True)
+    sub.choices["answer"].add_argument("--limit", type=int, help="Only run the first N MedHorizon QA examples")
+    sub.choices["answer"].add_argument("--top-k", type=int, help="Override retrieval.top_k for this run")
+    sub.choices["answer"].add_argument("--reader-frame-root", help="Cache directory for dense Reader-stage frames")
     sub.choices["retrieve"].add_argument("--question", required=True)
     sub.choices["retrieve"].add_argument("--video-id", required=True)
     sub.choices["retrieve"].add_argument("--top-k", type=int)
@@ -153,8 +156,10 @@ def main() -> None:
             ],
         }, ensure_ascii=False, indent=2))
     else:
-        examples = [QAExample(**row) for row in read_jsonl(args.annotations)]
-        predictions = run_qa(examples, config)
+        examples = list(MedHorizonDataset(args.annotations).iter_questions())
+        predictions = run_medhorizon_qa(
+            examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
+        )
         write_jsonl(args.output, (prediction.to_dict() for prediction in predictions))
         print(f"Wrote {len(predictions)} predictions to {args.output}")
 

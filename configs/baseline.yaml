@@ -33,8 +33,12 @@ retrieval:
   top_k: 5
   index_path: artifacts/index_openai
 llm:
-  provider: extractive
+  # mock verifies the full retrieval -> dense frames -> reader pipeline offline.
+  # For a hosted or local OpenAI-compatible VLM, use provider: openai_compatible,
+  # model: <model>, and optionally base_url / api_key_env.
+  provider: mock
   model: placeholder
   max_context_chunks: 5
+  frames_per_chunk: 16
 evaluation:
   normalize_text: true

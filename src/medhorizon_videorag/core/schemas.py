@@ -46,6 +46,15 @@ class Prediction:
     prediction: str
     evidence: list[dict[str, Any]]
     reference: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReaderAnswer:
+    """A multiple-choice answer produced from retrieved visual evidence."""
+
+    choice: str
+    rationale: str = ""
