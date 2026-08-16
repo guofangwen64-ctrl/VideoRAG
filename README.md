@@ -146,7 +146,7 @@ python experiments/evaluate_qa.py --predictions artifacts/qa_mock_10.jsonl \
 # 一次性：创建与项目 .venv 隔离的 vLLM 环境
 python3 -m venv .venv-vllm
 source .venv-vllm/bin/activate
-pip install -U vllm
+./scripts/setup_vllm_cuda12.sh
 
 # 保持此终端运行；首次会下载 Qwen2.5-VL-7B
 ./scripts/serve_qwen25vl.sh
