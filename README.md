@@ -139,8 +139,27 @@ python experiments/evaluate_qa.py --predictions artifacts/qa_mock_10.jsonl \
   --output artifacts/qa_mock_10_report.json
 ```
 
-`mock` 固定选择第一个选项，因此它只用于冒烟测试，不能作为模型结果。使用 OpenAI 或本地
-OpenAI-compatible VLM 时，在另一个配置文件中设置：
+`mock` 固定选择第一个选项，因此它只用于冒烟测试，不能作为模型结果。仓库已提供 A6000 的
+首个真实模型配置 [reader_qwen25vl.yaml](configs/reader_qwen25vl.yaml) 及两个脚本。首次在服务器执行：
+
+```bash
+# 一次性：创建与项目 .venv 隔离的 vLLM 环境
+python3 -m venv .venv-vllm
+source .venv-vllm/bin/activate
+pip install -U vllm
+
+# 保持此终端运行；首次会下载 Qwen2.5-VL-7B
+./scripts/serve_qwen25vl.sh
+```
+
+另开一个终端，进入项目环境并运行第一轮 20 题实验：
+
+```bash
+source .venv/bin/activate
+./scripts/run_qwen25vl_smoke.sh
+```
+
+使用其他 OpenAI-compatible VLM 时，在另一个配置文件中设置：
 
 ```yaml
 llm:
