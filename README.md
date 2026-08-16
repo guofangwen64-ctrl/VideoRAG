@@ -90,6 +90,15 @@ python experiments/evaluate_retrieval.py \
 
 默认 `--scope intra_video`：每道 MedHorizon QA 已给定源视频，因此只在该视频的 chunks 中检索，这是主实验设置。`--scope global` 可作为跨视频检索的困难对照，但不能与视频内指标混合比较。
 
+## 混合检索路由
+
+`HybridRetriever` 会优先解析题干中的明确时间范围或时间点，并按 chunk 元数据确定性返回重叠片段；没有时间表达的问题才加载视觉编码器并在所属视频内检索。可单独验证路由，无需启动 CLIP 来处理时间题：
+
+```bash
+medrag retrieve --config configs/baseline.yaml --video-id multibypass_SBP12 \
+  --question "What happened from 1:09:18 to 1:10:18?" --top-k 4
+```
+
 真实实验时，将 `vision.provider` 切换为实现了 `VisualEmbedder` 的模型适配器，并将 `llm.provider` 替换为你的服务适配器。检索与生成的输入/输出均使用领域对象，不依赖具体模型 SDK。
 
 ## 视觉编码器实验顺序

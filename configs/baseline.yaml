@@ -29,6 +29,7 @@ vision:
 #   device: cuda
 #   batch_size: 16
 retrieval:
+  router: hybrid
   top_k: 5
   index_path: artifacts/index
 llm:

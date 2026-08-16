@@ -36,6 +36,7 @@ class Chunk:
 class RetrievalResult:
     chunk: Chunk
     score: float
+    source: str = "visual"
 
 
 @dataclass(frozen=True)

@@ -49,6 +49,13 @@ class TemporalEvidence:
         return result
 
 
+@dataclass(frozen=True)
+class TemporalQuery:
+    start_seconds: float
+    end_seconds: float
+    kind: str
+
+
 def parse_timecode(value: str) -> float:
     units = [float(unit) for unit in value.split(":")]
     if len(units) == 2:
@@ -56,6 +63,22 @@ def parse_timecode(value: str) -> float:
     if len(units) == 3:
         return units[0] * 3600 + units[1] * 60 + units[2]
     raise ValueError(f"Invalid time code: {value}")
+
+
+def parse_temporal_query(text: str) -> TemporalQuery | None:
+    """Extract an explicit range or point from a user question at inference time."""
+    for pattern, parse in ((_RANGE_TIME_CODE, lambda item: parse_timecode(item)), (_RANGE_SECONDS, float)):
+        match = pattern.search(text)
+        if match:
+            start, end = parse(match.group("time")), parse(match.group("end"))
+            if end >= start:
+                return TemporalQuery(start, end, "range")
+    for pattern, parse in ((_POINT_TIME_CODE, lambda item: parse_timecode(item)), (_POINT_SECONDS, float)):
+        match = pattern.search(text)
+        if match:
+            point = parse(match.group("time"))
+            return TemporalQuery(point, point, "point")
+    return None
 
 
 def _question_texts(qa: MedHorizonQA) -> list[tuple[str, str]]:
@@ -69,23 +92,13 @@ def _question_texts(qa: MedHorizonQA) -> list[tuple[str, str]]:
 
 def direct_evidence(qa: MedHorizonQA) -> TemporalEvidence | None:
     for field, text in _question_texts(qa):
-        for pattern, parse in ((_RANGE_TIME_CODE, lambda item: parse_timecode(item)), (_RANGE_SECONDS, float)):
-            match = pattern.search(text)
-            if match:
-                start, end = parse(match.group("time")), parse(match.group("end"))
-                if end >= start:
-                    return TemporalEvidence(
-                        qa.uid, qa.video_key, qa.video_path, "direct_range", "high", [(start, end)], field,
-                        task_name=qa.task_name, question=qa.question, answer=qa.answer,
-                    )
-        for pattern, parse in ((_POINT_TIME_CODE, lambda item: parse_timecode(item)), (_POINT_SECONDS, float)):
-            match = pattern.search(text)
-            if match:
-                point = parse(match.group("time"))
-                return TemporalEvidence(
-                    qa.uid, qa.video_key, qa.video_path, "direct_point", "high", [(point, point)], field,
-                    task_name=qa.task_name, question=qa.question, answer=qa.answer,
-                )
+        temporal = parse_temporal_query(text)
+        if temporal:
+            return TemporalEvidence(
+                qa.uid, qa.video_key, qa.video_path, f"direct_{temporal.kind}", "high",
+                [(temporal.start_seconds, temporal.end_seconds)], field,
+                task_name=qa.task_name, question=qa.question, answer=qa.answer,
+            )
     return None
 
 

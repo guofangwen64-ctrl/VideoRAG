@@ -8,7 +8,7 @@ from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
 from medhorizon_videorag.features import build_visual_embedder
 from medhorizon_videorag.features.utils import chunks_with_existing_frames
 from medhorizon_videorag.generation import ExtractiveGenerator
-from medhorizon_videorag.retrieval import NumpyVectorIndex, VideoRetriever
+from medhorizon_videorag.retrieval import HybridRetriever, NumpyVectorIndex, TemporalRetriever, VisualRetriever
 
 
 def build_index(chunks: Sequence[Chunk], config: ExperimentConfig) -> NumpyVectorIndex:
@@ -29,14 +29,25 @@ def build_index(chunks: Sequence[Chunk], config: ExperimentConfig) -> NumpyVecto
 
 def run_qa(examples: Sequence[QAExample], config: ExperimentConfig) -> list[Prediction]:
     index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
-    retriever = VideoRetriever(index, build_visual_embedder(config.vision))
+    retriever = HybridRetriever(
+        TemporalRetriever(index),
+        visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
+    )
     if config.llm.get("provider", "extractive") != "extractive":
         raise NotImplementedError("Register an LLM provider adapter before use")
     generator = ExtractiveGenerator()
     top_k = int(config.retrieval.get("top_k", 5))
-    return [Prediction(
-        id=item.id, question=item.question,
-        prediction=generator.answer(item.question, evidence := retriever.retrieve(item.question, top_k)),
-        evidence=[{"chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds, "end_seconds": hit.chunk.end_seconds} for hit in evidence],
-        reference=item.answer,
-    ) for item in examples]
+    predictions = []
+    for item in examples:
+        response = retriever.retrieve(item.question, item.video_id, top_k)
+        predictions.append(Prediction(
+            id=item.id, question=item.question,
+            prediction=generator.answer(item.question, response.results),
+            evidence=[
+                {"chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
+                 "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route}
+                for hit in response.results
+            ],
+            reference=item.answer,
+        ))
+    return predictions

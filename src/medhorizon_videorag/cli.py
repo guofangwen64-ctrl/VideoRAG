@@ -11,6 +11,8 @@ from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.evaluation import evaluate_predictions
 from medhorizon_videorag.ingestion import VideoChunker
 from medhorizon_videorag.pipelines import build_index, run_qa
+from medhorizon_videorag.retrieval import HybridRetriever, NumpyVectorIndex, TemporalRetriever, VisualRetriever
+from medhorizon_videorag.features import build_visual_embedder
 
 
 def _retry_video_ids(path: str | Path, minimum_ratio: float) -> set[str]:
@@ -28,7 +30,7 @@ def _retry_video_ids(path: str | Path, minimum_ratio: float) -> set[str]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="medrag")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("chunk", "index", "answer"):
+    for name in ("chunk", "index", "answer", "retrieve"):
         command = sub.add_parser(name)
         command.add_argument("--config", required=True)
     sub.choices["chunk"].add_argument("--annotations", required=True)
@@ -44,6 +46,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.choices["index"].add_argument("--chunks", required=True)
     sub.choices["answer"].add_argument("--annotations", required=True)
     sub.choices["answer"].add_argument("--output", required=True)
+    sub.choices["retrieve"].add_argument("--question", required=True)
+    sub.choices["retrieve"].add_argument("--video-id", required=True)
+    sub.choices["retrieve"].add_argument("--top-k", type=int)
     evaluate = sub.add_parser("evaluate")
     evaluate.add_argument("--predictions", required=True)
     return parser
@@ -128,6 +133,25 @@ def main() -> None:
         chunks = [Chunk(**row) for row in read_jsonl(args.chunks)]
         build_index(chunks, config)
         print(f"Indexed {len(chunks)} chunks at {config.retrieval['index_path']}")
+    elif args.command == "retrieve":
+        index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
+        retriever = HybridRetriever(
+            TemporalRetriever(index),
+            visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
+        )
+        response = retriever.retrieve(args.question, args.video_id, args.top_k or int(config.retrieval.get("top_k", 5)))
+        print(json.dumps({
+            "route": response.route,
+            "temporal_query": None if response.temporal_query is None else {
+                "start_seconds": response.temporal_query.start_seconds, "end_seconds": response.temporal_query.end_seconds,
+                "kind": response.temporal_query.kind,
+            },
+            "results": [
+                {"chunk_id": item.chunk.id, "start_seconds": item.chunk.start_seconds, "end_seconds": item.chunk.end_seconds,
+                 "score": item.score, "source": item.source}
+                for item in response.results
+            ],
+        }, ensure_ascii=False, indent=2))
     else:
         examples = [QAExample(**row) for row in read_jsonl(args.annotations)]
         predictions = run_qa(examples, config)
