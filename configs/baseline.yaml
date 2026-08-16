@@ -31,7 +31,7 @@ vision:
 retrieval:
   router: hybrid
   top_k: 5
-  index_path: artifacts/index
+  index_path: artifacts/index_openai
 llm:
   provider: extractive
   model: placeholder
