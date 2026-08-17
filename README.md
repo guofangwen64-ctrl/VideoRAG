@@ -216,6 +216,14 @@ export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
 输出为 `artifacts/qa_qwen3vl8b_question_only_20_report.json`，其中所有预测的路由均为
 `question_only`，证据数组为空。
 
+### 远程 API 的重试与断点续跑
+
+所有 `medrag answer --output <结果>.jsonl` 调用均会逐题追加保存。重新执行相同命令时，程序会读取
+现有输出并跳过已有成功预测的 `id`；因此无需改变任何 shell script 即可从中断处继续。对
+OpenAI-compatible API 的 HTTP 429，会按 `10, 20, 40, 80, 120, 120, 120, 120` 秒退避，最多重试
+8 次。其他单题异常不会中止整个任务，失败会记录为与输出相邻的错误日志（例如
+`result.jsonl` 对应 `result.errors.jsonl`），之后重跑时该题会自动再次尝试。
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。

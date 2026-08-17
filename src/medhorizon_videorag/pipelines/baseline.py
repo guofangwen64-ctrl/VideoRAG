@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Collection, Sequence
 
 from medhorizon_videorag.core.config import ExperimentConfig
 from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
@@ -58,8 +58,10 @@ def run_qa(examples: Sequence[QAExample], config: ExperimentConfig) -> list[Pred
 def run_medhorizon_qa(
     examples: Sequence[MedHorizonQA], config: ExperimentConfig, *, limit: int | None = None,
     top_k: int | None = None, reader_frame_root: str | Path | None = None, question_only: bool = False,
+    completed_ids: Collection[str] = (), on_prediction: Callable[[Prediction], None] | None = None,
+    on_error: Callable[[MedHorizonQA, Exception], None] | None = None,
 ) -> list[Prediction]:
-    """Run retrieval, on-demand dense sampling, and a multiple-choice VLM reader."""
+    """Run QA with optional checkpoint callbacks and per-example error isolation."""
     retriever = None
     if not question_only:
         index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
@@ -67,7 +69,9 @@ def run_medhorizon_qa(
             TemporalRetriever(index),
             visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
         )
-    selected = list(examples[:limit] if limit is not None else examples)
+    candidates = examples[:limit] if limit is not None else examples
+    completed = {str(item_id) for item_id in completed_ids}
+    selected = [item for item in candidates if str(item.uid) not in completed]
     effective_top_k = top_k or int(config.retrieval.get("top_k", 5))
     artifact_dir = Path(config.project.get("artifact_dir", "artifacts"))
     reader_config = config.llm
@@ -77,41 +81,49 @@ def run_medhorizon_qa(
     reader = build_video_reader(reader_config)
     predictions: list[Prediction] = []
     for number, item in enumerate(selected, start=1):
-        evidence: list[dict] = []
-        route = "question_only"
-        if not question_only:
-            assert retriever is not None and extractor is not None
-            response = retriever.retrieve(item.question, item.video_key, effective_top_k)
-            route = response.route
-        if not question_only and response.route == "temporal" and response.temporal_query and response.temporal_query.kind == "range":
-            if not response.results:
-                raise RuntimeError(f"Temporal range for QA {item.uid} has no indexed chunks")
-            temporal = response.temporal_query
-            frames = extractor.extract_window(
-                item.video_key, response.results[0].chunk.video_path, temporal.start_seconds, temporal.end_seconds,
-            )
-            evidence.append({
-                "chunk_id": f"temporal_{item.video_key}_{temporal.start_seconds:.3f}_{temporal.end_seconds:.3f}",
-                "chunk_ids": [hit.chunk.id for hit in response.results], "score": response.results[0].score,
-                "start_seconds": temporal.start_seconds, "end_seconds": temporal.end_seconds,
-                "source": "temporal_window", "route": response.route,
-                "reader_frame_paths": frames,
-            })
-        elif not question_only:
-            for hit in response.results:
-                frames = extractor.extract(hit.chunk)
+        try:
+            evidence: list[dict] = []
+            route = "question_only"
+            if not question_only:
+                assert retriever is not None and extractor is not None
+                response = retriever.retrieve(item.question, item.video_key, effective_top_k)
+                route = response.route
+            if not question_only and response.route == "temporal" and response.temporal_query and response.temporal_query.kind == "range":
+                if not response.results:
+                    raise RuntimeError(f"Temporal range for QA {item.uid} has no indexed chunks")
+                temporal = response.temporal_query
+                frames = extractor.extract_window(
+                    item.video_key, response.results[0].chunk.video_path, temporal.start_seconds, temporal.end_seconds,
+                )
                 evidence.append({
-                    "chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
-                    "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route,
+                    "chunk_id": f"temporal_{item.video_key}_{temporal.start_seconds:.3f}_{temporal.end_seconds:.3f}",
+                    "chunk_ids": [hit.chunk.id for hit in response.results], "score": response.results[0].score,
+                    "start_seconds": temporal.start_seconds, "end_seconds": temporal.end_seconds,
+                    "source": "temporal_window", "route": response.route,
                     "reader_frame_paths": frames,
                 })
-        answer = reader.answer(item.question, item.options, evidence)
-        predictions.append(Prediction(
-            id=str(item.uid), question=item.question, prediction=answer.choice, reference=item.answer,
-            evidence=evidence, metadata={
-                "task_name": item.task_name, "task_id": item.task_id, "route": route,
-                "reader_provider": reader_config.get("provider", "mock"), "rationale": answer.rationale,
-            },
-        ))
-        print(f"[{number}/{len(selected)}] {item.uid}: {route} -> {answer.choice}", flush=True)
+            elif not question_only:
+                for hit in response.results:
+                    frames = extractor.extract(hit.chunk)
+                    evidence.append({
+                        "chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
+                        "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route,
+                        "reader_frame_paths": frames,
+                    })
+            answer = reader.answer(item.question, item.options, evidence)
+            prediction = Prediction(
+                id=str(item.uid), question=item.question, prediction=answer.choice, reference=item.answer,
+                evidence=evidence, metadata={
+                    "task_name": item.task_name, "task_id": item.task_id, "route": route,
+                    "reader_provider": reader_config.get("provider", "mock"), "rationale": answer.rationale,
+                },
+            )
+            if on_prediction:
+                on_prediction(prediction)
+            predictions.append(prediction)
+            print(f"[{number}/{len(selected)}] {item.uid}: {route} -> {answer.choice}", flush=True)
+        except Exception as error:
+            if on_error:
+                on_error(item, error)
+            print(f"[{number}/{len(selected)}] FAILED {item.uid}: {type(error).__name__}: {error}", flush=True)
     return predictions

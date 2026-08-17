@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
@@ -36,15 +37,20 @@ class MockChoiceReader:
 class OpenAICompatibleVisionReader:
     """OpenAI-compatible Chat Completions reader, usable with hosted or local VLMs."""
 
+    max_rate_limit_retries = 8
+    initial_retry_seconds = 10
+    max_retry_seconds = 120
+
     def __init__(self, model: str, api_key_env: str = "OPENAI_API_KEY", base_url: str | None = None, max_tokens: int = 256) -> None:
         try:
-            from openai import OpenAI
+            from openai import OpenAI, RateLimitError
         except ImportError as error:
             raise RuntimeError("Install model dependencies: pip install -e '.[models]'") from error
         api_key = os.getenv(api_key_env)
         if not api_key:
             raise RuntimeError(f"Set {api_key_env} before using the OpenAI-compatible reader")
         self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.rate_limit_error = RateLimitError
         self.model = model
         self.max_tokens = max_tokens
 
@@ -69,10 +75,22 @@ class OpenAICompatibleVisionReader:
             for frame_path in item.get("reader_frame_paths", []):
                 encoded = base64.b64encode(Path(frame_path).read_bytes()).decode("ascii")
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}})
-        response = self.client.chat.completions.create(
-            model=self.model, messages=[{"role": "user", "content": content}],
-            temperature=0, max_tokens=self.max_tokens,
-        )
+        for retry_number in range(self.max_rate_limit_retries + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model, messages=[{"role": "user", "content": content}],
+                    temperature=0, max_tokens=self.max_tokens,
+                )
+                break
+            except self.rate_limit_error:
+                if retry_number >= self.max_rate_limit_retries:
+                    raise
+                wait_seconds = min(self.initial_retry_seconds * (2 ** retry_number), self.max_retry_seconds)
+                print(
+                    f"Rate limited (HTTP 429); retry {retry_number + 1}/{self.max_rate_limit_retries} in {wait_seconds}s",
+                    flush=True,
+                )
+                time.sleep(wait_seconds)
         text = response.choices[0].message.content or ""
         try:
             payload = json.loads(re.search(r"\{.*\}", text, re.DOTALL).group())

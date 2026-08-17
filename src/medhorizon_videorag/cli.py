@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from medhorizon_videorag.core.config import load_config
-from medhorizon_videorag.core.io import read_jsonl, write_jsonl
-from medhorizon_videorag.core.schemas import Chunk, Prediction, QAExample
+from medhorizon_videorag.core.io import read_jsonl
+from medhorizon_videorag.core.schemas import Chunk, Prediction
 from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.evaluation import evaluate_predictions
 from medhorizon_videorag.ingestion import VideoChunker
@@ -25,6 +26,12 @@ def _retry_video_ids(path: str | Path, minimum_ratio: float) -> set[str]:
             if ratio >= minimum_ratio:
                 selected.add(str(row["video_id"]))
     return selected
+
+
+def _append_jsonl(handle, row: dict) -> None:
+    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -158,12 +165,30 @@ def main() -> None:
         }, ensure_ascii=False, indent=2))
     else:
         examples = list(MedHorizonDataset(args.annotations).iter_questions())
-        predictions = run_medhorizon_qa(
-            examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
-            question_only=args.question_only,
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        existing = read_jsonl(output) if output.exists() else []
+        completed_ids = {str(row["id"]) for row in existing if row.get("id") is not None and row.get("prediction") is not None}
+        error_path = output.with_name(f"{output.stem}.errors.jsonl")
+        with output.open("a", encoding="utf-8") as prediction_log, error_path.open("a", encoding="utf-8") as error_log:
+            def save_prediction(prediction: Prediction) -> None:
+                _append_jsonl(prediction_log, prediction.to_dict())
+
+            def save_error(item, error: Exception) -> None:
+                _append_jsonl(error_log, {
+                    "id": str(item.uid), "video_id": item.video_key, "error_type": type(error).__name__,
+                    "error": str(error),
+                })
+
+            predictions = run_medhorizon_qa(
+                examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
+                question_only=args.question_only, completed_ids=completed_ids,
+                on_prediction=save_prediction, on_error=save_error,
+            )
+        print(
+            f"Appended {len(predictions)} predictions to {output}; skipped {len(completed_ids)} completed IDs. "
+            f"Failures, if any: {error_path}"
         )
-        write_jsonl(args.output, (prediction.to_dict() for prediction in predictions))
-        print(f"Wrote {len(predictions)} predictions to {args.output}")
 
 
 if __name__ == "__main__":
