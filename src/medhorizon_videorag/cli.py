@@ -49,6 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.choices["answer"].add_argument("--limit", type=int, help="Only run the first N MedHorizon QA examples")
     sub.choices["answer"].add_argument("--top-k", type=int, help="Override retrieval.top_k for this run")
     sub.choices["answer"].add_argument("--reader-frame-root", help="Cache directory for dense Reader-stage frames")
+    sub.choices["answer"].add_argument("--question-only", action="store_true", help="Do not retrieve or send video frames to the Reader")
     sub.choices["retrieve"].add_argument("--question", required=True)
     sub.choices["retrieve"].add_argument("--video-id", required=True)
     sub.choices["retrieve"].add_argument("--top-k", type=int)
@@ -159,6 +160,7 @@ def main() -> None:
         examples = list(MedHorizonDataset(args.annotations).iter_questions())
         predictions = run_medhorizon_qa(
             examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
+            question_only=args.question_only,
         )
         write_jsonl(args.output, (prediction.to_dict() for prediction in predictions))
         print(f"Wrote {len(predictions)} predictions to {args.output}")

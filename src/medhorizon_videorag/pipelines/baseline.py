@@ -57,28 +57,33 @@ def run_qa(examples: Sequence[QAExample], config: ExperimentConfig) -> list[Pred
 
 def run_medhorizon_qa(
     examples: Sequence[MedHorizonQA], config: ExperimentConfig, *, limit: int | None = None,
-    top_k: int | None = None, reader_frame_root: str | Path | None = None,
+    top_k: int | None = None, reader_frame_root: str | Path | None = None, question_only: bool = False,
 ) -> list[Prediction]:
     """Run retrieval, on-demand dense sampling, and a multiple-choice VLM reader."""
-    index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
-    retriever = HybridRetriever(
-        TemporalRetriever(index),
-        visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
-    )
+    retriever = None
+    if not question_only:
+        index = NumpyVectorIndex.load(Path(config.retrieval["index_path"]))
+        retriever = HybridRetriever(
+            TemporalRetriever(index),
+            visual_factory=lambda: VisualRetriever(index, build_visual_embedder(config.vision)),
+        )
     selected = list(examples[:limit] if limit is not None else examples)
     effective_top_k = top_k or int(config.retrieval.get("top_k", 5))
     artifact_dir = Path(config.project.get("artifact_dir", "artifacts"))
     reader_config = config.llm
-    extractor = FineFrameExtractor(
-        reader_frame_root or artifact_dir / "reader_frames",
-        int(reader_config.get("frames_per_chunk", 16)),
+    extractor = None if question_only else FineFrameExtractor(
+        reader_frame_root or artifact_dir / "reader_frames", int(reader_config.get("frames_per_chunk", 16)),
     )
     reader = build_video_reader(reader_config)
     predictions: list[Prediction] = []
     for number, item in enumerate(selected, start=1):
-        response = retriever.retrieve(item.question, item.video_key, effective_top_k)
         evidence: list[dict] = []
-        if response.route == "temporal" and response.temporal_query and response.temporal_query.kind == "range":
+        route = "question_only"
+        if not question_only:
+            assert retriever is not None and extractor is not None
+            response = retriever.retrieve(item.question, item.video_key, effective_top_k)
+            route = response.route
+        if not question_only and response.route == "temporal" and response.temporal_query and response.temporal_query.kind == "range":
             if not response.results:
                 raise RuntimeError(f"Temporal range for QA {item.uid} has no indexed chunks")
             temporal = response.temporal_query
@@ -92,7 +97,7 @@ def run_medhorizon_qa(
                 "source": "temporal_window", "route": response.route,
                 "reader_frame_paths": frames,
             })
-        else:
+        elif not question_only:
             for hit in response.results:
                 frames = extractor.extract(hit.chunk)
                 evidence.append({
@@ -104,9 +109,9 @@ def run_medhorizon_qa(
         predictions.append(Prediction(
             id=str(item.uid), question=item.question, prediction=answer.choice, reference=item.answer,
             evidence=evidence, metadata={
-                "task_name": item.task_name, "task_id": item.task_id, "route": response.route,
+                "task_name": item.task_name, "task_id": item.task_id, "route": route,
                 "reader_provider": reader_config.get("provider", "mock"), "rationale": answer.rationale,
             },
         ))
-        print(f"[{number}/{len(selected)}] {item.uid}: {response.route} -> {answer.choice}", flush=True)
+        print(f"[{number}/{len(selected)}] {item.uid}: {route} -> {answer.choice}", flush=True)
     return predictions

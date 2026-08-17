@@ -204,6 +204,18 @@ export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
 同一前 20 题；新预测 JSONL 的时间题证据 `source` 会标为 `temporal_window`，并保存完整窗口对应的
 缓存帧路径。
 
+### Question-only 对照
+
+严格 question-only 模式不会加载索引、不会运行检索，也不会把任何视频帧发送到 API；它只测量
+问题与选项带来的语言先验。它应始终使用与视觉实验相同的题目、模型和输出长度：
+
+```bash
+./scripts/run_modelscope_qwen3vl8b_question_only_20.sh
+```
+
+输出为 `artifacts/qa_qwen3vl8b_question_only_20_report.json`，其中所有预测的路由均为
+`question_only`，证据数组为空。
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。
