@@ -21,10 +21,9 @@ retrieval:
   index_path: artifacts/index_openai
 llm:
   provider: openai_compatible
-  model: Qwen/Qwen2.5-VL-7B-Instruct
+  model: Qwen/Qwen3-VL-8B-Instruct
   api_key_env: MODELSCOPE_ACCESS_TOKEN
   base_url: https://api-inference.modelscope.cn/v1
-  # Keep remote API payloads small for the first baseline.
   frames_per_chunk: 8
   max_tokens: 256
 evaluation:

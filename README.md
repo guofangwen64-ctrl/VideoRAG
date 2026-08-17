@@ -173,19 +173,19 @@ llm:
 ### ModelScope 远程 API
 
 无需启动本地 vLLM。仓库提供
-[reader_modelscope_qwen25vl7b.yaml](configs/reader_modelscope_qwen25vl7b.yaml)，使用
-`Qwen/Qwen2.5-VL-7B-Instruct` 和 ModelScope 的 OpenAI-compatible API。先在 ModelScope 创建
+[reader_modelscope_qwen3vl8b.yaml](configs/reader_modelscope_qwen3vl8b.yaml)，使用
+`Qwen/Qwen3-VL-8B-Instruct` 和 ModelScope 的 OpenAI-compatible API。先在 ModelScope 创建
 Token，并在服务器项目环境中设置它：
 
 ```bash
 export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
-./scripts/run_modelscope_qwen25vl7b_check.sh
+./scripts/run_modelscope_qwen3vl8b_check.sh
 ```
 
 单题检查成功后再运行：
 
 ```bash
-./scripts/run_modelscope_qwen25vl7b_20.sh
+./scripts/run_modelscope_qwen3vl8b_20.sh
 ```
 
 该远程基线固定为 Top-1、每 chunk 8 帧，以控制上传图像数量与 API 消耗。
