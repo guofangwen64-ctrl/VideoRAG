@@ -1,0 +1,31 @@
+# Remote ModelScope API baseline. No local vLLM/GPU service is required.
+project:
+  seed: 42
+  artifact_dir: artifacts
+data:
+  video_root: /media/pc3048/8e92fcae-9dcb-48b7-818b-82c5f8ed050e/aidata/GuoFangjin/MedHorizon_video/MedHorizon
+chunking:
+  duration_seconds: 30.0
+  stride_seconds: 30.0
+  frames_per_chunk: 8
+  ffmpeg_fallback_min_incomplete_ratio: 0.1
+vision:
+  provider: openai_clip
+  model_name: ViT-B-32
+  pretrained: openai
+  device: cuda
+  batch_size: 256
+retrieval:
+  router: hybrid
+  top_k: 1
+  index_path: artifacts/index_openai
+llm:
+  provider: openai_compatible
+  model: Qwen/Qwen2.5-VL-7B-Instruct
+  api_key_env: MODELSCOPE_ACCESS_TOKEN
+  base_url: https://api-inference.modelscope.cn/v1
+  # Keep remote API payloads small for the first baseline.
+  frames_per_chunk: 8
+  max_tokens: 256
+evaluation:
+  normalize_text: true

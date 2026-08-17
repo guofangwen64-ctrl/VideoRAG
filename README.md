@@ -170,6 +170,26 @@ llm:
   frames_per_chunk: 16
 ```
 
+### ModelScope 远程 API
+
+无需启动本地 vLLM。仓库提供
+[reader_modelscope_qwen25vl7b.yaml](configs/reader_modelscope_qwen25vl7b.yaml)，使用
+`Qwen/Qwen2.5-VL-7B-Instruct` 和 ModelScope 的 OpenAI-compatible API。先在 ModelScope 创建
+Token，并在服务器项目环境中设置它：
+
+```bash
+export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
+./scripts/run_modelscope_qwen25vl7b_check.sh
+```
+
+单题检查成功后再运行：
+
+```bash
+./scripts/run_modelscope_qwen25vl7b_20.sh
+```
+
+该远程基线固定为 Top-1、每 chunk 8 帧，以控制上传图像数量与 API 消耗。
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。
