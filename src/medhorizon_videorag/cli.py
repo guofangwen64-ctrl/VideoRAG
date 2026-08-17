@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
+import sys
+import time
+from dataclasses import asdict
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from medhorizon_videorag.core.config import load_config
@@ -32,6 +38,31 @@ def _append_jsonl(handle, row: dict) -> None:
     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     handle.flush()
     os.fsync(handle.fileno())
+
+
+def _git_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _package_versions() -> dict[str, str | None]:
+    values: dict[str, str | None] = {}
+    for package in ("openai", "torch", "open-clip-torch", "transformers"):
+        try:
+            values[package] = version(package)
+        except PackageNotFoundError:
+            values[package] = None
+    return values
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -170,24 +201,58 @@ def main() -> None:
         existing = read_jsonl(output) if output.exists() else []
         completed_ids = {str(row["id"]) for row in existing if row.get("id") is not None and row.get("prediction") is not None}
         error_path = output.with_name(f"{output.stem}.errors.jsonl")
-        with output.open("a", encoding="utf-8") as prediction_log, error_path.open("a", encoding="utf-8") as error_log:
-            def save_prediction(prediction: Prediction) -> None:
-                _append_jsonl(prediction_log, prediction.to_dict())
+        run_path = output.with_name(f"{output.stem}.run.json")
+        candidate_ids = {str(item.uid) for item in (examples[:args.limit] if args.limit is not None else examples)}
+        started_at = datetime.now(timezone.utc)
+        run_record = {
+            "status": "running", "started_at": started_at.isoformat(), "finished_at": None,
+            "config_path": str(Path(args.config).resolve()), "config": asdict(config),
+            "git_commit": _git_commit(), "python": sys.version, "packages": _package_versions(),
+            "model": config.llm.get("model"), "reader_provider": config.llm.get("provider"),
+            "frames_per_chunk": config.llm.get("frames_per_chunk"),
+            "top_k": args.top_k or config.retrieval.get("top_k"), "question_only": args.question_only,
+            "annotations": args.annotations, "requested_limit": args.limit,
+            "candidate_questions": len(candidate_ids), "completed_before": len(candidate_ids & completed_ids),
+            "scheduled_questions": len(candidate_ids - completed_ids), "output": str(output),
+            "error_log": str(error_path), "new_predictions": 0, "failed_questions": 0,
+        }
+        _write_json(run_path, run_record)
+        started_perf = time.perf_counter()
+        predictions: list[Prediction] = []
+        failures = 0
+        try:
+            with output.open("a", encoding="utf-8") as prediction_log, error_path.open("a", encoding="utf-8") as error_log:
+                def save_prediction(prediction: Prediction) -> None:
+                    _append_jsonl(prediction_log, prediction.to_dict())
 
-            def save_error(item, error: Exception) -> None:
-                _append_jsonl(error_log, {
-                    "id": str(item.uid), "video_id": item.video_key, "error_type": type(error).__name__,
-                    "error": str(error),
-                })
+                def save_error(item, error: Exception) -> None:
+                    nonlocal failures
+                    failures += 1
+                    _append_jsonl(error_log, {
+                        "id": str(item.uid), "video_id": item.video_key, "error_type": type(error).__name__,
+                        "error": str(error),
+                    })
 
-            predictions = run_medhorizon_qa(
-                examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
-                question_only=args.question_only, completed_ids=completed_ids,
-                on_prediction=save_prediction, on_error=save_error,
-            )
+                predictions = run_medhorizon_qa(
+                    examples, config, limit=args.limit, top_k=args.top_k, reader_frame_root=args.reader_frame_root,
+                    question_only=args.question_only, completed_ids=completed_ids,
+                    on_prediction=save_prediction, on_error=save_error,
+                )
+        except Exception as error:
+            run_record["status"] = "failed"
+            run_record["fatal_error"] = f"{type(error).__name__}: {error}"
+            raise
+        finally:
+            run_record.update({
+                "finished_at": datetime.now(timezone.utc).isoformat(), "runtime_seconds": round(time.perf_counter() - started_perf, 3),
+                "new_predictions": len(predictions), "failed_questions": failures,
+            })
+            if run_record["status"] == "running":
+                run_record["status"] = "completed" if not failures else "completed_with_failures"
+            _write_json(run_path, run_record)
         print(
-            f"Appended {len(predictions)} predictions to {output}; skipped {len(completed_ids)} completed IDs. "
-            f"Failures, if any: {error_path}"
+            f"Appended {len(predictions)} predictions to {output}; skipped {len(candidate_ids & completed_ids)} completed IDs. "
+            f"Failures, if any: {error_path}; run record: {run_path}"
         )
 
 

@@ -224,6 +224,34 @@ OpenAI-compatible API 的 HTTP 429，会按 `10, 20, 40, 80, 120, 120, 120, 120`
 8 次。其他单题异常不会中止整个任务，失败会记录为与输出相邻的错误日志（例如
 `result.jsonl` 对应 `result.errors.jsonl`），之后重跑时该题会自动再次尝试。
 
+每次 QA 运行还会写出 `result.run.json`，记录实际 config 快照、Git commit、模型与帧数、Top-K、
+题目范围、依赖版本、起止时间和成功/失败数量。
+
+### 逐题配对与固定评估协议
+
+比较 question-only 与视频条件时，使用逐题配对报告，而不仅是比较两个均值：
+
+```bash
+python experiments/compare_qa_predictions.py \
+  --left artifacts/qa_qwen3vl8b_question_only_20.jsonl --left-name question_only \
+  --right artifacts/qa_qwen3vl8b_temporal_window16_top1_20.jsonl --right-name temporal_window \
+  --output artifacts/qwen3vl8b_pairwise_20.json \
+  --details artifacts/qwen3vl8b_pairwise_20_details.jsonl
+```
+
+`right_only_correct` 表示视频证据帮助答对，`left_only_correct` 表示视频条件反而答错。
+
+固定协议汇总工具将数据划分为 explicit time、implicit time、no reliable time 三组；前两组可接入
+检索报告，最后一组只报告端到端 QA：
+
+```bash
+python experiments/evaluate_baseline_suite.py --annotations medhorizon_test.jsonl \
+  --retrieval hybrid=artifacts/retrieval_hybrid_openai.json \
+  --qa question_only=artifacts/qa_qwen3vl8b_question_only_20.jsonl \
+  --qa temporal_window=artifacts/qa_qwen3vl8b_temporal_window16_top1_20.jsonl \
+  --output artifacts/baseline_suite_report.json
+```
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。
