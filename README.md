@@ -252,6 +252,9 @@ python experiments/evaluate_baseline_suite.py --annotations medhorizon_test.json
   --output artifacts/baseline_suite_report.json
 ```
 
+汇总会检查传入检索报告中的直接时间题数量是否与当前解析规则一致；若显示
+`matches_current_protocol: false`，必须先重新运行检索评估，不能混合比较旧报告与新分区。
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。

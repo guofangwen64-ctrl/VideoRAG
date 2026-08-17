@@ -55,9 +55,22 @@ def main() -> None:
             },
         }
     retrieval_reports = {}
+    direct_time_count = len(partitions["explicit_time"]) + len(partitions["implicit_time"])
     for entry in args.retrieval:
         name, path = _named_path(entry)
-        retrieval_reports[name] = {"path": str(path), "report": json.loads(path.read_text(encoding="utf-8"))}
+        retrieval_report = json.loads(path.read_text(encoding="utf-8"))
+        reported_direct_count = retrieval_report.get("direct_range_questions", 0) + retrieval_report.get("direct_point_questions", 0)
+        compatibility = {
+            "expected_direct_time_questions": direct_time_count,
+            "reported_direct_time_questions": reported_direct_count,
+            "matches_current_protocol": reported_direct_count == direct_time_count,
+        }
+        if not compatibility["matches_current_protocol"]:
+            compatibility["warning"] = (
+                "This retrieval report was generated with a different temporal-evidence/parser version. "
+                "Regenerate retrieval evaluation before comparing it with the current QA partitions."
+            )
+        retrieval_reports[name] = {"path": str(path), "report": retrieval_report, "protocol_compatibility": compatibility}
     report = {
         "protocol": {
             "explicit_time": "Direct range/point time stated in the deployed rewritten question; report retrieval IoU/Hit and QA accuracy.",
