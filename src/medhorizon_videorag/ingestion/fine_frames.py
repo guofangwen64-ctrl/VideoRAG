@@ -21,7 +21,19 @@ class FineFrameExtractor:
         self.frames_per_chunk = frames_per_chunk
 
     def extract(self, chunk: Chunk) -> list[str]:
-        output_dir = self.frame_root / chunk.video_id / chunk.id
+        return self._extract(chunk.video_id, chunk.video_path, chunk.start_seconds, chunk.end_seconds, chunk.id)
+
+    def extract_window(self, video_id: str, video_path: str, start_seconds: float, end_seconds: float) -> list[str]:
+        """Extract frames across an entire user-specified temporal range."""
+        cache_key = f"temporal_{start_seconds:010.3f}_{end_seconds:010.3f}".replace(".", "_")
+        return self._extract(video_id, video_path, start_seconds, end_seconds, cache_key)
+
+    def _extract(
+        self, video_id: str, video_path: str, start_seconds: float, end_seconds: float, cache_key: str,
+    ) -> list[str]:
+        if end_seconds <= start_seconds:
+            raise ValueError("Reader evidence window must have positive duration")
+        output_dir = self.frame_root / video_id / cache_key
         existing = sorted(output_dir.glob("*.jpg"))
         if len(existing) >= self.frames_per_chunk:
             return [str(path) for path in existing[:self.frames_per_chunk]]
@@ -29,10 +41,10 @@ class FineFrameExtractor:
         output_dir.mkdir(parents=True, exist_ok=True)
         for path in existing:
             path.unlink()
-        duration = max(0.001, chunk.end_seconds - chunk.start_seconds)
+        duration = end_seconds - start_seconds
         command = [
-            "ffmpeg", "-nostdin", "-v", "error", "-ss", str(chunk.start_seconds),
-            "-i", chunk.video_path, "-t", str(duration), "-an",
+            "ffmpeg", "-nostdin", "-v", "error", "-ss", str(start_seconds),
+            "-i", video_path, "-t", str(duration), "-an",
             "-vf", f"fps={self.frames_per_chunk / duration}", "-frames:v", str(self.frames_per_chunk),
             "-q:v", "2", "-y", str(output_dir / "%02d.jpg"),
         ]
@@ -43,5 +55,5 @@ class FineFrameExtractor:
         frames = sorted(output_dir.glob("*.jpg"))
         if result.returncode != 0 and not frames:
             message = result.stderr.strip() or "unknown FFmpeg error"
-            raise RuntimeError(f"Could not extract Reader frames for {chunk.id}: {message}")
+            raise RuntimeError(f"Could not extract Reader frames for {cache_key}: {message}")
         return [str(path) for path in frames]

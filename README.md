@@ -190,6 +190,20 @@ export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
 
 该远程基线固定为 Top-1、每 chunk 8 帧，以控制上传图像数量与 API 消耗。
 
+### 完整时间窗 Reader 对照
+
+对于显式时间范围题，`temporal_window` Reader 不再只把排名第一的 30 秒 chunk 交给 VLM，
+而是直接在题目指定的完整时间范围均匀提取 16 帧；视觉路由题仍按检索 chunk 取帧。它是针对
+`Top-1 × 8 帧` 基线的受控改进实验：
+
+```bash
+./scripts/run_modelscope_qwen3vl8b_temporal_window_20.sh
+```
+
+输出为 `artifacts/qa_qwen3vl8b_temporal_window16_top1_20_report.json`。与旧报告比较时，必须使用
+同一前 20 题；新预测 JSONL 的时间题证据 `source` 会标为 `temporal_window`，并保存完整窗口对应的
+缓存帧路径。
+
 然后执行相同的 `medrag answer` 命令。预测 JSONL 会保存每题的答案标签、检索路由、时间证据、
 Reader 帧路径和简短理由；`evaluate_qa.py` 输出总体、任务类别和 temporal/visual 路由分组的
 多选准确率。

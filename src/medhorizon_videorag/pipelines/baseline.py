@@ -78,13 +78,28 @@ def run_medhorizon_qa(
     for number, item in enumerate(selected, start=1):
         response = retriever.retrieve(item.question, item.video_key, effective_top_k)
         evidence: list[dict] = []
-        for hit in response.results:
-            frames = extractor.extract(hit.chunk)
+        if response.route == "temporal" and response.temporal_query and response.temporal_query.kind == "range":
+            if not response.results:
+                raise RuntimeError(f"Temporal range for QA {item.uid} has no indexed chunks")
+            temporal = response.temporal_query
+            frames = extractor.extract_window(
+                item.video_key, response.results[0].chunk.video_path, temporal.start_seconds, temporal.end_seconds,
+            )
             evidence.append({
-                "chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
-                "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route,
+                "chunk_id": f"temporal_{item.video_key}_{temporal.start_seconds:.3f}_{temporal.end_seconds:.3f}",
+                "chunk_ids": [hit.chunk.id for hit in response.results], "score": response.results[0].score,
+                "start_seconds": temporal.start_seconds, "end_seconds": temporal.end_seconds,
+                "source": "temporal_window", "route": response.route,
                 "reader_frame_paths": frames,
             })
+        else:
+            for hit in response.results:
+                frames = extractor.extract(hit.chunk)
+                evidence.append({
+                    "chunk_id": hit.chunk.id, "score": hit.score, "start_seconds": hit.chunk.start_seconds,
+                    "end_seconds": hit.chunk.end_seconds, "source": hit.source, "route": response.route,
+                    "reader_frame_paths": frames,
+                })
         answer = reader.answer(item.question, item.options, evidence)
         predictions.append(Prediction(
             id=str(item.uid), question=item.question, prediction=answer.choice, reference=item.answer,

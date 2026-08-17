@@ -16,11 +16,11 @@ from .medhorizon import MedHorizonDataset, MedHorizonQA
 
 _TIME_CODE = r"(?P<time>\d{1,2}:\d{2}(?::\d{2})?)"
 _RANGE_TIME_CODE = re.compile(
-    rf"(?:from|between|spanning|during)\s+{_TIME_CODE}\s*(?:to|and|-)\s*(?P<end>\d{{1,2}}:\d{{2}}(?::\d{{2}})?)",
+    rf"(?:from|between|spanning|during|interval|at)\s+{_TIME_CODE}\s*(?:to|and|-)\s*(?P<end>\d{{1,2}}:\d{{2}}(?::\d{{2}})?)",
     re.IGNORECASE,
 )
 _RANGE_SECONDS = re.compile(
-    r"(?:from|between|spanning|during)\s+(?:second(?:s)?\s*)?(?P<time>\d+(?:\.\d+)?)\s*"
+    r"(?:from|between|spanning|during|interval|at)\s+(?:second(?:s)?\s*)?(?P<time>\d+(?:\.\d+)?)\s*"
     r"(?:to|and|-)\s*(?:second(?:s)?\s*)?(?P<end>\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )

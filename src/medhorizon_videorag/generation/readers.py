@@ -51,8 +51,10 @@ class OpenAICompatibleVisionReader:
     def answer(self, question: str, choices: Sequence[str], evidence: Sequence[dict[str, Any]]) -> ReaderAnswer:
         labels = _choice_labels(choices)
         prompt = (
-            "You are a medical-video multiple-choice QA reader. Use only the supplied frames. "
-            "Return exactly one JSON object with keys choice and rationale. choice must be one of "
+            "You are a medical-video multiple-choice QA reader. Compare every listed option against the supplied "
+            "frames and choose the best-supported option. Use only visible evidence: do not invent anatomy, surgical "
+            "steps, instruments, or actions that cannot be seen. Return exactly one JSON object with keys choice and "
+            "rationale. The rationale must be a short statement of visible evidence, not unsupported medical knowledge. choice must be one of "
             f"{labels}.\nQuestion: {question}\nChoices:\n" + "\n".join(choices) + "\nEvidence:"
         )
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
