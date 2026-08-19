@@ -1,5 +1,10 @@
 """VGent-compatible preprocessing utilities kept separate from the existing baseline."""
 
+from .description import (
+    DESCRIPTION_PROMPT_VERSION,
+    OpenAICompatibleClipDescriber,
+    select_even_full_clips,
+)
 from .schemas import VgentClipPlan, VgentVideoPlan
 from .slicing import VgentSlicingConfig, VgentSlicingPlanner, summarize_vgent_plans
 from .streaming import (
@@ -12,7 +17,9 @@ from .streaming import (
 )
 
 __all__ = [
+    "DESCRIPTION_PROMPT_VERSION",
     "MedicalStreamingExtractor",
+    "OpenAICompatibleClipDescriber",
     "VgentClipPlan",
     "VgentSlicingConfig",
     "VgentSlicingPlanner",
@@ -20,6 +27,7 @@ __all__ = [
     "load_video_plan",
     "safe_video_key",
     "save_video_plan",
+    "select_even_full_clips",
     "summarize_vgent_plans",
     "video_manifest_path",
     "video_plan_cache_complete",

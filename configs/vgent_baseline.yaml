@@ -23,3 +23,12 @@ vgent:
   opencv_jpeg_quality: 95
   ffmpeg_jpeg_quality: 2
   ffmpeg_fallback_min_incomplete_ratio: 0.01
+  description:
+    # Dedicated 64-image Qwen2.5-VL service; separate from the 16-frame QA baseline.
+    model: Qwen/Qwen2.5-VL-7B-Instruct
+    base_url: http://127.0.0.1:8001/v1
+    api_key_env: OPENAI_API_KEY
+    frames_per_request: 64
+    clip_count: 10
+    max_tokens: 1024
+    timeout_seconds: 600
