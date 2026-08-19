@@ -100,7 +100,7 @@ python experiments/extract_vgent_streaming.py \
 
 该命令不会把整段视频加载到内存或 GPU；它顺序解码一次并按 1 FPS 写入 `artifacts/vgent_baseline/frames/`。每个视频完成后原子保存独立 manifest，重跑会跳过已完成视频。OpenCV 严重缺帧时会使用 FFmpeg 做一次固定 FPS 后备解码。聚合清单与报告分别写入 `streaming_manifest.jsonl` 和 `streaming_report.json`。由于全量约有数百万张采样帧，不应在未检查单视频空间占用前直接去掉 `--limit`。
 
-Qwen2.5-VL 的 64 帧 clip 描述使用独立服务脚本 `scripts/serve_qwen25vl_vgent64.sh`，不会改变原 16 帧 QA baseline。描述实验只选择帧缓存完整的 clip，并一次输入全部 64 张 1 FPS 帧：
+Qwen2.5-VL 的 64 帧 clip 描述使用独立服务脚本 `scripts/serve_qwen25vl_vgent64.sh`，不会改变原 16 帧 QA baseline。描述实验只选择帧缓存完整的 clip，并一次输入全部 64 张 1 FPS 帧；每帧在内存中等比例缩小后发送，原始缓存不会被改写：
 
 ```bash
 # 在 .venv-vllm 环境中启动 64-image 服务，默认端口 8001。

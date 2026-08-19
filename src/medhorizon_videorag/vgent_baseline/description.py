@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -52,6 +53,7 @@ class OpenAICompatibleClipDescriber:
         api_key_env: str = "OPENAI_API_KEY",
         max_tokens: int = 1024,
         timeout_seconds: float = 600,
+        max_image_pixels: int = 200704,
     ) -> None:
         try:
             from openai import OpenAI
@@ -67,6 +69,9 @@ class OpenAICompatibleClipDescriber:
         )
         self.model = model
         self.max_tokens = max_tokens
+        if max_image_pixels <= 0:
+            raise ValueError("max_image_pixels must be positive")
+        self.max_image_pixels = max_image_pixels
 
     def describe(
         self, clip: VgentClipPlan, *, frames_per_request: int = 64
@@ -91,7 +96,7 @@ class OpenAICompatibleClipDescriber:
         )
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for frame_path in clip.frame_paths:
-            encoded = base64.b64encode(Path(frame_path).read_bytes()).decode("ascii")
+            encoded = _encode_resized_jpeg(frame_path, self.max_image_pixels)
             content.append(
                 {
                     "type": "image_url",
@@ -122,6 +127,33 @@ class OpenAICompatibleClipDescriber:
         if missing:
             raise RuntimeError(f"Description is missing required keys: {missing}")
         return payload
+
+
+def _encode_resized_jpeg(path: str | Path, max_pixels: int) -> str:
+    try:
+        import cv2
+    except ImportError as error:
+        raise RuntimeError(
+            "Install video dependencies: pip install -e '.[video]'"
+        ) from error
+    image = cv2.imread(str(path))
+    if image is None:
+        raise ValueError(f"Cannot decode frame: {path}")
+    height, width = image.shape[:2]
+    pixels = height * width
+    if pixels > max_pixels:
+        scale = math.sqrt(max_pixels / pixels)
+        resized_width = max(1, int(width * scale))
+        resized_height = max(1, int(height * scale))
+        image = cv2.resize(
+            image,
+            (resized_width, resized_height),
+            interpolation=cv2.INTER_AREA,
+        )
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise RuntimeError(f"Cannot encode frame: {path}")
+    return base64.b64encode(encoded.tobytes()).decode("ascii")
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

@@ -7,7 +7,6 @@ set -euo pipefail
 : "${VLM_PORT:=8001}"
 : "${VLM_GPU_MEMORY_UTILIZATION:=0.90}"
 : "${VLM_MAX_MODEL_LEN:=32768}"
-: "${VLM_MAX_PIXELS:=200704}"
 : "${VLM_MODEL:=Qwen/Qwen2.5-VL-7B-Instruct}"
 : "${VLM_SERVED_MODEL_NAME:=Qwen/Qwen2.5-VL-7B-Instruct}"
 
@@ -19,5 +18,4 @@ exec vllm serve "$VLM_MODEL" \
   --gpu-memory-utilization "$VLM_GPU_MEMORY_UTILIZATION" \
   --max-model-len "$VLM_MAX_MODEL_LEN" \
   --max-num-seqs 1 \
-  --limit-mm-per-prompt image=64 \
-  --mm-processor-kwargs "{\"max_pixels\": $VLM_MAX_PIXELS}"
+  --limit-mm-per-prompt image=64

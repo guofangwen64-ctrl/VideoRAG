@@ -82,6 +82,7 @@ def main() -> None:
         api_key_env=str(description.get("api_key_env", "OPENAI_API_KEY")),
         max_tokens=int(description.get("max_tokens", 1024)),
         timeout_seconds=float(description.get("timeout_seconds", 600)),
+        max_image_pixels=int(description.get("max_image_pixels", 200704)),
     )
     output = Path(args.output)
     errors = Path(args.errors)

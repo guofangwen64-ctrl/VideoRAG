@@ -29,6 +29,8 @@ vgent:
     base_url: http://127.0.0.1:8001/v1
     api_key_env: OPENAI_API_KEY
     frames_per_request: 64
+    # Resize in memory before upload; keeps all 64 temporal samples within context.
+    max_image_pixels: 200704
     clip_count: 10
     max_tokens: 1024
     timeout_seconds: 600
