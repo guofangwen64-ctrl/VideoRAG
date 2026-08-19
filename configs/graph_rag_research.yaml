@@ -1,0 +1,41 @@
+# Research contract for the second-generation medical Graph-RAG pipeline.
+# This configuration is NOT runnable by the current `medrag` CLI yet.
+project:
+  seed: 42
+  artifact_dir: artifacts/graph_rag
+pipeline:
+  name: medical_graph_rag
+  status: design_only
+  baseline_compatible: true
+data:
+  # Supply on the server through a local, untracked override or a future CLI flag.
+  video_root: null
+  annotation_schema: medical-graph-qa-v1
+chunking:
+  # Multi-scale values are hypotheses and must be selected on a development set.
+  phase_window_seconds: 300
+  phase_stride_seconds: 150
+  event_window_seconds: 32
+  event_stride_seconds: 16
+graph:
+  schema_version: medical-video-graph-v1
+  scope: intra_video
+  node_types: [segment, phase, action, instrument, anatomy, finding]
+  edge_types: [temporal_before, contains, uses, acts_on, causes, same_entity, co_occurs]
+  builder:
+    provider: not_configured
+    require_grounded_intervals: true
+retrieval:
+  strategy: graph_multi_hop
+  initial_candidates: 20
+  max_hops: 3
+  max_verified_intervals: 5
+  visual_fallback: true
+llm:
+  provider: not_configured
+  model: not_configured
+evaluation:
+  evidence_iou_threshold: 0.3
+  report_evidence_set_recall: true
+  report_path_accuracy: true
+  report_qa_accuracy: true

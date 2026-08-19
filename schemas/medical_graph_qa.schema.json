@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "medical-graph-qa-v1",
+  "title": "Medical long-video Graph-RAG QA example",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "video_id",
+    "question",
+    "answer",
+    "reasoning_type",
+    "required_evidence_count",
+    "evidence"
+  ],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "video_id": {"type": "string", "minLength": 1},
+    "question": {"type": "string", "minLength": 1},
+    "answer": {"type": "string", "minLength": 1},
+    "choices": {"type": "array", "items": {"type": "string"}},
+    "reasoning_type": {
+      "enum": ["single_hop", "multi_hop", "comparison", "causal", "temporal_order"]
+    },
+    "required_evidence_count": {"type": "integer", "minimum": 1},
+    "evidence_relation": {"type": ["string", "null"]},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/evidenceInterval"}
+    },
+    "hard_negative_evidence": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidenceInterval"}
+    },
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "evidenceInterval": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["video_id", "start_seconds", "end_seconds"],
+      "properties": {
+        "video_id": {"type": "string", "minLength": 1},
+        "start_seconds": {"type": "number", "minimum": 0},
+        "end_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "frame_paths": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

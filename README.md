@@ -2,6 +2,18 @@
 
 面向医学长视频 QA 的可扩展研究工程。当前实现第一阶段 VideoRAG baseline：视频切片、视觉特征、向量检索、LLM 回答与评估。Agent 和 GraphRAG 预留在架构边界中，尚未实现。
 
+## 研究管线边界
+
+仓库现在明确区分两条管线：
+
+| 管线 | 状态 | 目标 |
+| --- | --- | --- |
+| `baseline` | 已实现、可运行 | 固定 chunk、CLIP/时间检索和 VLM Reader；继续作为可复现对照 |
+| `vgent_baseline` | 切片规划与流式抽帧已实现；尚未建图 | 复现 VGent 的 1 FPS、每 64 个采样帧一组，并对比无上限医学长视频适配与官方采样上限 |
+| `medical_graph_rag` | 研究协议与代码契约已建立，算法尚未实现 | 无显式时间问题上的医学事件建图、多跳证据检索、区间验证与医学问答 |
+
+现有 `medrag` CLI 仍然只运行原 baseline。VGent 前期验证使用独立脚本和 `artifacts/vgent_baseline/`；`configs/graph_rag_research.yaml` 仍是后续研究设计，不能作为已完成实验直接运行。Graph-RAG 的研究假设、阶段计划和工程边界见 [docs/graph_rag_research_plan.md](docs/graph_rag_research_plan.md)，无时间泄漏、多证据区间 QA 的标注与评估协议见 [docs/medical_graph_qa_protocol.md](docs/medical_graph_qa_protocol.md)。
+
 ## 安装
 
 ```bash
@@ -63,6 +75,30 @@ MedHorizon 的原始标注采用“每行一个视频、内嵌 QA 列表”的 J
 ```bash
 python experiments/analyze_dataset.py --annotations medhorizon_test.jsonl --output artifacts/dataset_report.json
 ```
+
+## VGent 切片前期验证
+
+当前阶段只复现 VGent 的采样和 clip 分组，不提取实体、不建图、不运行多跳检索。先根据标注时长生成计划清单与统计报告：
+
+```bash
+python experiments/validate_vgent_slicing.py \
+  --config configs/vgent_baseline.yaml \
+  --annotations medhorizon_test.jsonl
+```
+
+默认输出为 `artifacts/vgent_baseline/slicing_manifest.jsonl` 和 `artifacts/vgent_baseline/slicing_report.json`。默认 `medical_streaming` 模式保持 1 FPS 且没有全视频 7,200 帧上限；将配置切换为 `official_cap` 时，报告会显示官方上限造成的有效 FPS 下降。两种模式都会记录尾部 partial clip 和官方 `64 × 20` 最小采样帧条件。
+
+真实视频抽帧使用独立的顺序解码命令。首次只处理一个视频，核对时长、帧数、磁盘占用和首/中/尾 clip 后再扩大范围：
+
+```bash
+python experiments/extract_vgent_streaming.py \
+  --config configs/vgent_baseline.yaml \
+  --annotations medhorizon_test.jsonl \
+  --video-root /path/to/MedHorizon \
+  --limit 1
+```
+
+该命令不会把整段视频加载到内存或 GPU；它顺序解码一次并按 1 FPS 写入 `artifacts/vgent_baseline/frames/`。每个视频完成后原子保存独立 manifest，重跑会跳过已完成视频。OpenCV 严重缺帧时会使用 FFmpeg 做一次固定 FPS 后备解码。聚合清单与报告分别写入 `streaming_manifest.jsonl` 和 `streaming_report.json`。由于全量约有数百万张采样帧，不应在未检查单视频空间占用前直接去掉 `--limit`。
 
 ## 时间证据恢复
 

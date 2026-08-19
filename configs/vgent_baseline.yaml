@@ -1,0 +1,25 @@
+# VGent-compatible slicing validation. No graph construction is performed.
+project:
+  seed: 42
+  artifact_dir: artifacts/vgent_baseline
+pipeline:
+  name: vgent_baseline
+  status: medical_streaming_validation
+data:
+  # Keep server-specific absolute paths in a local, untracked override.
+  video_root: null
+vgent:
+  # Long-video adaptation: preserve 1 FPS without a global sampled-frame cap.
+  mode: medical_streaming
+  sample_fps: 1.0
+  frames_per_clip: 64
+  include_partial_clip: true
+  # Retained only for the optional mode: official_cap comparison.
+  min_sampled_frames: 128
+  max_sampled_frames: 7200
+  frame_factor: 2
+  n_retrieval: 20
+  # Streaming extraction options.
+  opencv_jpeg_quality: 95
+  ffmpeg_jpeg_quality: 2
+  ffmpeg_fallback_min_incomplete_ratio: 0.01
