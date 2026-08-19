@@ -8,8 +8,11 @@ set -euo pipefail
 : "${VLM_GPU_MEMORY_UTILIZATION:=0.90}"
 : "${VLM_MAX_MODEL_LEN:=32768}"
 : "${VLM_MAX_PIXELS:=200704}"
+: "${VLM_MODEL:=Qwen/Qwen2.5-VL-7B-Instruct}"
+: "${VLM_SERVED_MODEL_NAME:=Qwen/Qwen2.5-VL-7B-Instruct}"
 
-exec vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
+exec vllm serve "$VLM_MODEL" \
+  --served-model-name "$VLM_SERVED_MODEL_NAME" \
   --host "$VLM_HOST" \
   --port "$VLM_PORT" \
   --dtype bfloat16 \
