@@ -308,19 +308,24 @@ class OpenAICompatibleClipDescriber:
                     ),
                 },
             ]
-            rewrite = self._request_payload(
-                rewrite_messages,
-                max_tokens=min(self.max_tokens, 384),
-            )
-            if "summary" not in rewrite or "medical_inferences" not in rewrite:
-                raise RuntimeError(
-                    "Observation rewrite is missing summary or medical_inferences"
+            try:
+                rewrite = self._request_payload(
+                    rewrite_messages,
+                    max_tokens=min(self.max_tokens, 384),
                 )
-            payload = {
-                **payload,
-                "summary": rewrite["summary"],
-                "medical_inferences": rewrite["medical_inferences"],
-            }
+                if "summary" not in rewrite or "medical_inferences" not in rewrite:
+                    raise RuntimeError(
+                        "Observation rewrite is missing summary or medical_inferences"
+                    )
+                payload = {
+                    **payload,
+                    "summary": rewrite["summary"],
+                    "medical_inferences": rewrite["medical_inferences"],
+                }
+            except (RuntimeError, TypeError):
+                # Preserve the already validated first response when only the
+                # optional observation rewrite returns malformed JSON.
+                pass
             self.last_attempt_count = 2
             _validate_description_payload(payload)
         return payload
