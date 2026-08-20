@@ -10,7 +10,20 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v4"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v5"
+
+OBSERVATION_FIRST_SYSTEM_PROMPT = """You are a literal visual transcription system.
+The summary and observed_facts must contain only directly visible appearance,
+motion, and spatial relationships. In the summary, never use possibly, likely,
+may, blood, bleeding, surgical field, surgical work, procedure, suture,
+suturing, irrigation, blood vessel, inflamed, dissection, resection, repair,
+or ligation. Use generic appearance-first terms such as red fluid, clear fluid,
+thread-like material, tubular structure, reddish tissue, and instrument.
+Do not infer a medical action from generic instrument-tissue interaction.
+medical_inferences must be [] unless distinctive visual evidence supports an
+interpretation. Never use video titles, metadata, or neighboring-clip context.
+Return only the requested JSON object. Before responding, silently check the
+summary for every forbidden word and rewrite it if any is present."""
 
 DESCRIPTION_PROMPT = """You are analyzing a short clip from a long medical procedure video.
 
@@ -239,7 +252,10 @@ class OpenAICompatibleClipDescriber:
             )
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": content}],
+            messages=[
+                {"role": "system", "content": OBSERVATION_FIRST_SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ],
             temperature=0,
             max_tokens=self.max_tokens,
             response_format={"type": "json_object"},

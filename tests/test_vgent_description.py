@@ -5,6 +5,7 @@ import pytest
 from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT,
     DESCRIPTION_PROMPT_VERSION,
+    OBSERVATION_FIRST_SYSTEM_PROMPT,
     prepare_request_frame_paths,
     select_even_full_clips,
 )
@@ -70,7 +71,7 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
 
 
 def test_observation_first_prompt_contract() -> None:
-    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v4"
+    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v5"
     assert "The summary MUST contain only directly visible information." in (
         DESCRIPTION_PROMPT
     )
@@ -80,3 +81,5 @@ def test_observation_first_prompt_contract() -> None:
     )
     assert "return an empty medical_inferences array" in DESCRIPTION_PROMPT
     assert "The action may represent suturing." not in DESCRIPTION_PROMPT
+    assert "literal visual transcription system" in OBSERVATION_FIRST_SYSTEM_PROMPT
+    assert "silently check the" in OBSERVATION_FIRST_SYSTEM_PROMPT
