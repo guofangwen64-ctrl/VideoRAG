@@ -206,6 +206,37 @@ def select_even_full_clips(
     return [eligible[position] for position in positions]
 
 
+def select_full_clips_by_index(
+    clips: Sequence[VgentClipPlan],
+    indices: Sequence[int],
+    *,
+    frames_per_request: int = 64,
+) -> list[VgentClipPlan]:
+    """Select exact complete clips while preserving the requested order."""
+    if not indices or frames_per_request <= 0:
+        raise ValueError(
+            "indices must not be empty and frames_per_request must be positive"
+        )
+    if len(set(indices)) != len(indices):
+        raise ValueError("clip indices must be unique")
+    by_index = {clip.clip_index: clip for clip in clips}
+    selected = []
+    for index in indices:
+        clip = by_index.get(index)
+        if clip is None:
+            raise ValueError(f"Clip index {index} is not present in the manifest")
+        if (
+            clip.sampled_frame_count != frames_per_request
+            or len(clip.frame_paths) != frames_per_request
+            or any(not Path(path).is_file() for path in clip.frame_paths)
+        ):
+            raise ValueError(
+                f"Clip index {index} is not a complete {frames_per_request}-frame clip"
+            )
+        selected.append(clip)
+    return selected
+
+
 def prepare_request_frame_paths(
     clip: VgentClipPlan,
     *,
@@ -244,6 +275,10 @@ class OpenAICompatibleClipDescriber:
         max_tokens: int = 1024,
         timeout_seconds: float = 600,
         max_image_pixels: int = 200704,
+        rewrite_summary_violations: bool = True,
+        max_retries: int = 2,
+        response_format_json: bool = True,
+        request_extra_body: dict[str, Any] | None = None,
     ) -> None:
         try:
             from openai import OpenAI
@@ -255,7 +290,10 @@ class OpenAICompatibleClipDescriber:
         if not api_key:
             raise RuntimeError(f"Set {api_key_env} before describing clips")
         self.client = OpenAI(
-            api_key=api_key, base_url=base_url, timeout=timeout_seconds
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
         )
         self.model = model
         self.max_tokens = max_tokens
@@ -263,6 +301,9 @@ class OpenAICompatibleClipDescriber:
         if max_image_pixels <= 0:
             raise ValueError("max_image_pixels must be positive")
         self.max_image_pixels = max_image_pixels
+        self.rewrite_summary_violations = rewrite_summary_violations
+        self.response_format_json = response_format_json
+        self.request_extra_body = request_extra_body or {}
 
     def describe(
         self, clip: VgentClipPlan, *, frames_per_request: int = 64
@@ -288,7 +329,7 @@ class OpenAICompatibleClipDescriber:
         self.last_attempt_count = 1
         _validate_description_payload(payload)
         violations = find_summary_rule_violations(str(payload["summary"]))
-        if violations:
+        if violations and self.rewrite_summary_violations:
             rewrite_messages: list[dict[str, Any]] = [
                 {"role": "system", "content": OBSERVATION_FIRST_SYSTEM_PROMPT},
                 {
@@ -336,13 +377,17 @@ class OpenAICompatibleClipDescriber:
         *,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0,
-            max_tokens=max_tokens or self.max_tokens,
-            response_format={"type": "json_object"},
-        )
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": max_tokens or self.max_tokens,
+        }
+        if self.response_format_json:
+            request["response_format"] = {"type": "json_object"}
+        if self.request_extra_body:
+            request["extra_body"] = self.request_extra_body
+        response = self.client.chat.completions.create(**request)
         text = response.choices[0].message.content or ""
         return _parse_json_object(text)
 

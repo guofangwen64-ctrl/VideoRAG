@@ -5,6 +5,7 @@ from .description import (
     OpenAICompatibleClipDescriber,
     prepare_request_frame_paths,
     select_even_full_clips,
+    select_full_clips_by_index,
 )
 from .schemas import VgentClipPlan, VgentVideoPlan
 from .slicing import VgentSlicingConfig, VgentSlicingPlanner, summarize_vgent_plans
@@ -30,6 +31,7 @@ __all__ = [
     "safe_video_key",
     "save_video_plan",
     "select_even_full_clips",
+    "select_full_clips_by_index",
     "summarize_vgent_plans",
     "video_manifest_path",
     "video_plan_cache_complete",

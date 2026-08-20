@@ -116,6 +116,18 @@ OPENAI_API_KEY=EMPTY python experiments/describe_vgent_clips.py \
 
 使用 `--all-clips` 可覆盖单视频全部 clip。若尾片段不足 64 帧，脚本只对已完整抽取的合法 partial clip 重复最后一帧补足请求长度，并在输出中记录源帧数与 padding 数量。
 
+若使用 ModelScope 的 Qwen3.5-27B 做限额对比，使用独立配置和脚本，不改变本地 Qwen2.5-VL baseline。该脚本固定选择 20 个完整 clip，并关闭 SDK 自动重试和摘要二次改写，使每个 clip 最多发起一次模型请求：
+
+```bash
+export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
+./scripts/run_modelscope_qwen35_27b_vgent20.sh \
+  artifacts/vgent_baseline/<cache>/video_manifests/<video>.json
+```
+
+也可以直接给 `experiments/describe_vgent_clips.py` 传入 `--clip-indices 0,5,9` 复现实验子集。Token 只从环境变量读取，不得写入配置、脚本、日志或 Git。
+
+生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。
+
 ## 时间证据恢复
 
 公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。

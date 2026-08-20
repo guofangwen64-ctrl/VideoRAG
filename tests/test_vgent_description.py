@@ -9,6 +9,7 @@ from medhorizon_videorag.vgent_baseline.description import (
     find_summary_rule_violations,
     prepare_request_frame_paths,
     select_even_full_clips,
+    select_full_clips_by_index,
 )
 from medhorizon_videorag.vgent_baseline.schemas import VgentClipPlan
 
@@ -59,6 +60,23 @@ def test_selects_ten_even_complete_clips_and_excludes_partial(tmp_path: Path) ->
 def test_rejects_insufficient_complete_clips(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="only 1 are available"):
         select_even_full_clips([_clip(tmp_path, 0)], 2, frames_per_request=64)
+
+
+def test_selects_exact_complete_clip_indices(tmp_path: Path) -> None:
+    clips = [_clip(tmp_path, index) for index in range(4)]
+
+    selected = select_full_clips_by_index(clips, [3, 0, 2])
+
+    assert [clip.clip_index for clip in selected] == [3, 0, 2]
+
+
+def test_rejects_partial_or_duplicate_explicit_clip_indices(tmp_path: Path) -> None:
+    clips = [_clip(tmp_path, 0), _clip(tmp_path, 1, 60)]
+
+    with pytest.raises(ValueError, match="must be unique"):
+        select_full_clips_by_index(clips, [0, 0])
+    with pytest.raises(ValueError, match="not a complete"):
+        select_full_clips_by_index(clips, [1])
 
 
 def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:

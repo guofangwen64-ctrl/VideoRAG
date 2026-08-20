@@ -20,6 +20,7 @@ from medhorizon_videorag.vgent_baseline.description import (
     OpenAICompatibleClipDescriber,
     find_summary_rule_violations,
     select_even_full_clips,
+    select_full_clips_by_index,
 )
 
 
@@ -60,6 +61,10 @@ def main() -> None:
     parser.add_argument("--errors", required=True)
     parser.add_argument("--clip-count", type=int)
     parser.add_argument(
+        "--clip-indices",
+        help="Comma-separated exact complete clip indices; overrides --clip-count",
+    )
+    parser.add_argument(
         "--all-clips",
         action="store_true",
         help="Describe every clip; pad a valid partial tail by repeating its last frame",
@@ -73,15 +78,23 @@ def main() -> None:
     if frames_per_request != 64:
         raise ValueError("This VGent pilot requires exactly 64 frames per request")
     plan = load_video_plan(args.manifest)
-    selected = (
-        list(plan.clips)
-        if args.all_clips
-        else select_even_full_clips(
+    if args.all_clips and args.clip_indices:
+        raise ValueError("--all-clips and --clip-indices cannot be used together")
+    if args.clip_indices:
+        indices = [int(value.strip()) for value in args.clip_indices.split(",")]
+        selected = select_full_clips_by_index(
+            plan.clips,
+            indices,
+            frames_per_request=frames_per_request,
+        )
+    elif args.all_clips:
+        selected = list(plan.clips)
+    else:
+        selected = select_even_full_clips(
             plan.clips,
             clip_count,
             frames_per_request=frames_per_request,
         )
-    )
     print(
         f"Selected clip indices: {[clip.clip_index for clip in selected]}", flush=True
     )
@@ -93,6 +106,12 @@ def main() -> None:
         max_tokens=int(description.get("max_tokens", 1024)),
         timeout_seconds=float(description.get("timeout_seconds", 600)),
         max_image_pixels=int(description.get("max_image_pixels", 200704)),
+        rewrite_summary_violations=bool(
+            description.get("rewrite_summary_violations", True)
+        ),
+        max_retries=int(description.get("max_retries", 2)),
+        response_format_json=bool(description.get("response_format_json", True)),
+        request_extra_body=description.get("request_extra_body"),
     )
     output = Path(args.output)
     errors = Path(args.errors)

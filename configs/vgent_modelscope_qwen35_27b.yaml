@@ -1,0 +1,26 @@
+# ModelScope API comparison for the VGent-style 64-frame clip descriptor.
+# Kept separate from configs/vgent_baseline.yaml and the local Qwen2.5-VL service.
+project:
+  seed: 42
+  artifact_dir: artifacts/vgent_baseline
+pipeline:
+  name: vgent_modelscope_qwen35_27b_clip_comparison
+  status: twenty_clip_pilot
+vgent:
+  description:
+    model: Qwen/Qwen3.5-27B
+    base_url: https://api-inference.modelscope.cn/v1
+    api_key_env: MODELSCOPE_ACCESS_TOKEN
+    frames_per_request: 64
+    max_image_pixels: 200704
+    clip_count: 20
+    max_tokens: 2048
+    timeout_seconds: 600
+    # The free API quota is 20 requests/model/day. Keep one request per clip.
+    max_retries: 0
+    rewrite_summary_violations: false
+    # ModelScope examples rely on prompt-constrained JSON rather than this option.
+    response_format_json: false
+    request_extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
