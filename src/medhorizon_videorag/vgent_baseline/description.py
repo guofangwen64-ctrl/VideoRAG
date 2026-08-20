@@ -11,7 +11,7 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v9"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v10"
 
 SUMMARY_FORBIDDEN_TERMS = (
     "possibly",
@@ -294,30 +294,48 @@ class OpenAICompatibleClipDescriber:
                 {
                     "role": "user",
                     "content": (
-                        "Rewrite the following JSON object without adding new visual "
-                        "information. Its summary violates the observation-first "
+                        "Rewrite only the summary and medical_inferences from the "
+                        "following JSON without adding new visual information. The summary violates the observation-first "
                         "rules with these exact terms: "
                         f"{', '.join(violations)}. Remove those concepts and use "
                         "literal appearance words such as instrument, view, area, "
                         "red fluid, or clear fluid. Keep the summary to one sentence "
                         "of at most 30 words. Use medical_inferences=[] when the "
-                        "evidence is only generic interaction. Return only the full "
-                        "rewritten JSON object.\n\nInput JSON:\n"
+                        "evidence is only generic interaction. Return only this small "
+                        'JSON shape: {"summary":"...","medical_inferences":[]}. '
+                        "Do not repeat observed_facts or uncertainties.\n\nInput JSON:\n"
                         f"{json.dumps(payload, ensure_ascii=False)}"
                     ),
                 },
             ]
-            payload = self._request_payload(rewrite_messages)
+            rewrite = self._request_payload(
+                rewrite_messages,
+                max_tokens=min(self.max_tokens, 384),
+            )
+            if "summary" not in rewrite or "medical_inferences" not in rewrite:
+                raise RuntimeError(
+                    "Observation rewrite is missing summary or medical_inferences"
+                )
+            payload = {
+                **payload,
+                "summary": rewrite["summary"],
+                "medical_inferences": rewrite["medical_inferences"],
+            }
             self.last_attempt_count = 2
             _validate_description_payload(payload)
         return payload
 
-    def _request_payload(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def _request_payload(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=0,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens or self.max_tokens,
             response_format={"type": "json_object"},
         )
         text = response.choices[0].message.content or ""
