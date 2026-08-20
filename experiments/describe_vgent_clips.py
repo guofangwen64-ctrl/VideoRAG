@@ -18,6 +18,7 @@ from medhorizon_videorag.vgent_baseline import load_video_plan
 from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT_VERSION,
     OpenAICompatibleClipDescriber,
+    find_summary_rule_violations,
     select_even_full_clips,
 )
 
@@ -118,6 +119,10 @@ def main() -> None:
                     "padding_frames": frames_per_request - len(clip.frame_paths),
                     "model": describer.model,
                     "prompt_version": DESCRIPTION_PROMPT_VERSION,
+                    "generation_attempts": describer.last_attempt_count,
+                    "summary_rule_violations": find_summary_rule_violations(
+                        str(result["summary"])
+                    ),
                     "elapsed_seconds": round(time.monotonic() - started, 3),
                     "description": result,
                 },

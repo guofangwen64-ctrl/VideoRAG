@@ -6,6 +6,7 @@ from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT,
     DESCRIPTION_PROMPT_VERSION,
     OBSERVATION_FIRST_SYSTEM_PROMPT,
+    find_summary_rule_violations,
     prepare_request_frame_paths,
     select_even_full_clips,
 )
@@ -71,7 +72,7 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
 
 
 def test_observation_first_prompt_contract() -> None:
-    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v6"
+    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v7"
     assert "The summary MUST contain only directly visible information." in (
         DESCRIPTION_PROMPT
     )
@@ -85,4 +86,13 @@ def test_observation_first_prompt_contract() -> None:
     assert "silently check the" in OBSERVATION_FIRST_SYSTEM_PROMPT
     assert "exactly one short sentence of at most 30 words" in (
         OBSERVATION_FIRST_SYSTEM_PROMPT
+    )
+
+
+def test_finds_summary_rule_violations_without_substring_false_positives() -> None:
+    summary = "Red fluid is visible in a surgical field during tissue repair."
+
+    assert find_summary_rule_violations(summary) == ["surgical field", "repair"]
+    assert (
+        find_summary_rule_violations("A small tubular structure remains visible.") == []
     )

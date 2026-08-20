@@ -4,13 +4,34 @@ import base64
 import json
 import math
 import os
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v6"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v7"
+
+SUMMARY_FORBIDDEN_TERMS = (
+    "possibly",
+    "likely",
+    "may",
+    "blood",
+    "bleeding",
+    "surgical field",
+    "surgical work",
+    "procedure",
+    "suture",
+    "suturing",
+    "irrigation",
+    "blood vessel",
+    "inflamed",
+    "dissection",
+    "resection",
+    "repair",
+    "ligation",
+)
 
 OBSERVATION_FIRST_SYSTEM_PROMPT = """You are a literal visual transcription system.
 The summary and observed_facts must contain only directly visible appearance,
@@ -237,6 +258,7 @@ class OpenAICompatibleClipDescriber:
         )
         self.model = model
         self.max_tokens = max_tokens
+        self.last_attempt_count = 0
         if max_image_pixels <= 0:
             raise ValueError("max_image_pixels must be positive")
         self.max_image_pixels = max_image_pixels
@@ -257,44 +279,88 @@ class OpenAICompatibleClipDescriber:
                     "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
                 }
             )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": OBSERVATION_FIRST_SYSTEM_PROMPT},
+            {"role": "user", "content": content},
+        ]
+        payload = self._request_payload(messages)
+        self.last_attempt_count = 1
+        _validate_description_payload(payload)
+        violations = find_summary_rule_violations(str(payload["summary"]))
+        if violations:
+            messages.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(payload, ensure_ascii=False),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Rewrite the entire JSON object. The previous summary "
+                            "violated the observation-first rules with these terms: "
+                            f"{', '.join(violations)}. Replace setting or medical "
+                            "terms with literal appearance words such as view, area, "
+                            "red fluid, or clear fluid. Keep the summary to one "
+                            "sentence of at most 30 words. Reassess medical_inferences "
+                            "and use [] when evidence is only generic interaction."
+                        ),
+                    },
+                ]
+            )
+            payload = self._request_payload(messages)
+            self.last_attempt_count = 2
+            _validate_description_payload(payload)
+        return payload
+
+    def _request_payload(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": OBSERVATION_FIRST_SYSTEM_PROMPT},
-                {"role": "user", "content": content},
-            ],
+            messages=messages,
             temperature=0,
             max_tokens=self.max_tokens,
             response_format={"type": "json_object"},
         )
         text = response.choices[0].message.content or ""
-        payload = _parse_json_object(text)
-        required = {
-            "summary",
-            "observed_facts",
-            "medical_inferences",
-            "uncertainties",
-        }
-        missing = sorted(required - payload.keys())
-        if missing:
-            raise RuntimeError(f"Description is missing required keys: {missing}")
-        observed = payload["observed_facts"]
-        if not isinstance(observed, dict):
-            raise TypeError("observed_facts must be a JSON object")
-        observed_required = {
-            "visible_anatomy",
-            "visible_instruments",
-            "visible_objects",
-            "actions",
-            "state_changes",
-            "visual_evidence",
-        }
-        observed_missing = sorted(observed_required - observed.keys())
-        if observed_missing:
-            raise RuntimeError(
-                f"observed_facts is missing required keys: {observed_missing}"
-            )
-        return payload
+        return _parse_json_object(text)
+
+
+def _validate_description_payload(payload: dict[str, Any]) -> None:
+    required = {
+        "summary",
+        "observed_facts",
+        "medical_inferences",
+        "uncertainties",
+    }
+    missing = sorted(required - payload.keys())
+    if missing:
+        raise RuntimeError(f"Description is missing required keys: {missing}")
+    observed = payload["observed_facts"]
+    if not isinstance(observed, dict):
+        raise TypeError("observed_facts must be a JSON object")
+    observed_required = {
+        "visible_anatomy",
+        "visible_instruments",
+        "visible_objects",
+        "actions",
+        "state_changes",
+        "visual_evidence",
+    }
+    observed_missing = sorted(observed_required - observed.keys())
+    if observed_missing:
+        raise RuntimeError(
+            f"observed_facts is missing required keys: {observed_missing}"
+        )
+
+
+def find_summary_rule_violations(summary: str) -> list[str]:
+    """Return forbidden terms present in a generated summary."""
+    lowered = summary.lower()
+    return [
+        term
+        for term in SUMMARY_FORBIDDEN_TERMS
+        if re.search(rf"\b{re.escape(term)}\b", lowered)
+    ]
 
 
 def _encode_resized_jpeg(path: str | Path, max_pixels: int) -> str:
