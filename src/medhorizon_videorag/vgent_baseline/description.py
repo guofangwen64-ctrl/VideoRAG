@@ -10,11 +10,21 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v3"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v4"
 
 DESCRIPTION_PROMPT = """You are analyzing a short clip from a long medical procedure video.
 
 Your task is to describe the clip based strictly on the provided visual frames.
+
+Apply the observation-first rules before writing any JSON:
+- The summary is a literal visual account, not a medical interpretation.
+- Never write "possibly", "likely", or "may" in the summary.
+- Do not use "blood", "bleeding", "surgical field", "surgical work",
+  "procedure", "suture", "suturing", "irrigation", "blood vessel", or
+  "inflamed" in the summary; describe visible color, shape, material, motion,
+  and spatial relationships instead.
+- If there is no distinctive visual evidence for a medical interpretation,
+  return an empty medical_inferences array.
 
 IMPORTANT:
 Separate direct visual observations from medical interpretations.
@@ -76,12 +86,9 @@ unless distinctive visual evidence clearly supports that identification.
 
 2. MEDICAL INFERENCES
 Put interpretations here rather than in observed_facts.
-Examples:
-- "The action may represent suturing."
-- "The tissue may be cardiac tissue."
-- "This may correspond to a dissection step."
-
 Every inference must include its visual basis and confidence.
+Do not add an inference merely to fill the example schema. Return [] when the
+visible evidence is generic or insufficient.
 
 3. UNCERTAINTIES
 Explicitly record structures, instruments, actions, or phases that cannot

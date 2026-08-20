@@ -70,7 +70,7 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
 
 
 def test_observation_first_prompt_contract() -> None:
-    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v3"
+    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v4"
     assert "The summary MUST contain only directly visible information." in (
         DESCRIPTION_PROMPT
     )
@@ -78,3 +78,5 @@ def test_observation_first_prompt_contract() -> None:
     assert "Do not use external context, video title, dataset metadata" in (
         DESCRIPTION_PROMPT
     )
+    assert "return an empty medical_inferences array" in DESCRIPTION_PROMPT
+    assert "The action may represent suturing." not in DESCRIPTION_PROMPT
