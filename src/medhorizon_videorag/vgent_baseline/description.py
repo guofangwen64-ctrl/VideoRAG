@@ -11,7 +11,7 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v8"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v9"
 
 SUMMARY_FORBIDDEN_TERMS = (
     "possibly",
@@ -289,27 +289,25 @@ class OpenAICompatibleClipDescriber:
         _validate_description_payload(payload)
         violations = find_summary_rule_violations(str(payload["summary"]))
         if violations:
-            messages.extend(
-                [
-                    {
-                        "role": "assistant",
-                        "content": json.dumps(payload, ensure_ascii=False),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "Rewrite the entire JSON object. The previous summary "
-                            "violated the observation-first rules with these terms: "
-                            f"{', '.join(violations)}. Replace setting or medical "
-                            "terms with literal appearance words such as view, area, "
-                            "red fluid, or clear fluid. Keep the summary to one "
-                            "sentence of at most 30 words. Reassess medical_inferences "
-                            "and use [] when evidence is only generic interaction."
-                        ),
-                    },
-                ]
-            )
-            payload = self._request_payload(messages)
+            rewrite_messages: list[dict[str, Any]] = [
+                {"role": "system", "content": OBSERVATION_FIRST_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "Rewrite the following JSON object without adding new visual "
+                        "information. Its summary violates the observation-first "
+                        "rules with these exact terms: "
+                        f"{', '.join(violations)}. Remove those concepts and use "
+                        "literal appearance words such as instrument, view, area, "
+                        "red fluid, or clear fluid. Keep the summary to one sentence "
+                        "of at most 30 words. Use medical_inferences=[] when the "
+                        "evidence is only generic interaction. Return only the full "
+                        "rewritten JSON object.\n\nInput JSON:\n"
+                        f"{json.dumps(payload, ensure_ascii=False)}"
+                    ),
+                },
+            ]
+            payload = self._request_payload(rewrite_messages)
             self.last_attempt_count = 2
             _validate_description_payload(payload)
         return payload

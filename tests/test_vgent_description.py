@@ -72,7 +72,7 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
 
 
 def test_observation_first_prompt_contract() -> None:
-    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v8"
+    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v9"
     assert "The summary MUST contain only directly visible information." in (
         DESCRIPTION_PROMPT
     )
