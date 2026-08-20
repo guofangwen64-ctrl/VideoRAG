@@ -10,7 +10,91 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_v1"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_inference_v2"
+
+DESCRIPTION_PROMPT = """You are analyzing a short clip from a long medical procedure video.
+
+Your task is to describe the clip based strictly on the provided visual frames.
+
+IMPORTANT:
+Separate direct visual observations from medical interpretations.
+Do not present an inferred anatomical structure, surgical phase, diagnosis,
+or procedure as a directly observed fact.
+
+If something cannot be confidently identified, explicitly mark it as uncertain
+instead of guessing.
+
+Return ONLY valid JSON using the following schema:
+
+{
+  "summary": "...",
+
+  "observed_facts": {
+    "visible_anatomy": [],
+    "visible_instruments": [],
+    "visible_objects": [],
+    "actions": [
+      {
+        "subject": "...",
+        "action": "...",
+        "target": "..."
+      }
+    ],
+    "state_changes": [],
+    "visual_evidence": []
+  },
+
+  "medical_inferences": [
+    {
+      "inference": "...",
+      "basis": "...",
+      "confidence": "high | medium | low"
+    }
+  ],
+
+  "uncertainties": [
+    {
+      "item": "...",
+      "reason": "..."
+    }
+  ]
+}
+
+Rules:
+
+1. OBSERVED FACTS
+Include only information directly supported by visible evidence.
+Use generic terms when exact identity is unclear, such as:
+- tissue
+- tubular structure
+- surgical instrument
+- needle-like instrument
+- thread-like material
+
+Do NOT identify a structure as "meniscus", "heart", "vein", "tumor", etc.
+unless distinctive visual evidence clearly supports that identification.
+
+2. MEDICAL INFERENCES
+Put interpretations here rather than in observed_facts.
+Examples:
+- "The action may represent suturing."
+- "The tissue may be cardiac tissue."
+- "This may correspond to a dissection step."
+
+Every inference must include its visual basis and confidence.
+
+3. UNCERTAINTIES
+Explicitly record structures, instruments, actions, or phases that cannot
+be reliably identified.
+Do not guess simply to fill a field.
+
+4. PROCEDURE PHASE
+Do not infer a specific surgical phase from ambiguous local visual evidence.
+If a phase is suggested, include it only under medical_inferences.
+
+5. SUMMARY
+Summarize primarily the directly visible activity.
+Avoid unsupported anatomical or procedural claims."""
 
 
 def select_even_full_clips(
@@ -40,6 +124,32 @@ def select_even_full_clips(
         round(index * (len(eligible) - 1) / (count - 1)) for index in range(count)
     ]
     return [eligible[position] for position in positions]
+
+
+def prepare_request_frame_paths(
+    clip: VgentClipPlan,
+    *,
+    frames_per_request: int = 64,
+) -> list[str]:
+    """Return exact request length, padding only a valid partial tail clip."""
+    source_paths = list(clip.frame_paths)
+    if len(source_paths) != clip.sampled_frame_count:
+        raise ValueError(
+            f"Clip {clip.id} has {len(source_paths)} cached frames; "
+            f"expected {clip.sampled_frame_count}"
+        )
+    if any(not Path(path).is_file() for path in source_paths):
+        raise ValueError(f"Clip {clip.id} has missing cached frames")
+    if len(source_paths) == frames_per_request:
+        return source_paths
+    if clip.is_partial and source_paths and len(source_paths) < frames_per_request:
+        return source_paths + [source_paths[-1]] * (
+            frames_per_request - len(source_paths)
+        )
+    raise ValueError(
+        f"Clip {clip.id} has {len(source_paths)} frames; "
+        f"expected exactly {frames_per_request}"
+    )
 
 
 class OpenAICompatibleClipDescriber:
@@ -76,26 +186,12 @@ class OpenAICompatibleClipDescriber:
     def describe(
         self, clip: VgentClipPlan, *, frames_per_request: int = 64
     ) -> dict[str, Any]:
-        if len(clip.frame_paths) != frames_per_request:
-            raise ValueError(
-                f"Clip {clip.id} has {len(clip.frame_paths)} frames; "
-                f"expected exactly {frames_per_request}"
-            )
-        prompt = (
-            "You are analyzing one continuous segment of a medical or surgical video. "
-            "The images are chronological and uniformly sampled at one frame per second. "
-            "Describe only directly visible evidence. Do not infer a diagnosis, anatomy, "
-            "instrument, action, or procedural phase when it is not visually supported. "
-            "Use concise English terms and return exactly one JSON object with this schema: "
-            '{"summary":"", "procedure_phase":"", "anatomy":[], "instruments":[], '
-            '"entities":[{"name":"", "description":""}], '
-            '"actions":[{"subject":"", "action":"", "target":""}], '
-            '"findings":[], "state_changes":[], "uncertainties":[], '
-            '"visual_evidence":[]}. '
-            f"This segment covers {clip.start_seconds:.1f} to {clip.end_seconds:.1f} seconds."
+        request_paths = prepare_request_frame_paths(
+            clip,
+            frames_per_request=frames_per_request,
         )
-        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        for frame_path in clip.frame_paths:
+        content: list[dict[str, Any]] = [{"type": "text", "text": DESCRIPTION_PROMPT}]
+        for frame_path in request_paths:
             encoded = _encode_resized_jpeg(frame_path, self.max_image_pixels)
             content.append(
                 {
@@ -113,19 +209,29 @@ class OpenAICompatibleClipDescriber:
         payload = _parse_json_object(text)
         required = {
             "summary",
-            "procedure_phase",
-            "anatomy",
-            "instruments",
-            "entities",
-            "actions",
-            "findings",
-            "state_changes",
+            "observed_facts",
+            "medical_inferences",
             "uncertainties",
-            "visual_evidence",
         }
         missing = sorted(required - payload.keys())
         if missing:
             raise RuntimeError(f"Description is missing required keys: {missing}")
+        observed = payload["observed_facts"]
+        if not isinstance(observed, dict):
+            raise TypeError("observed_facts must be a JSON object")
+        observed_required = {
+            "visible_anatomy",
+            "visible_instruments",
+            "visible_objects",
+            "actions",
+            "state_changes",
+            "visual_evidence",
+        }
+        observed_missing = sorted(observed_required - observed.keys())
+        if observed_missing:
+            raise RuntimeError(
+                f"observed_facts is missing required keys: {observed_missing}"
+            )
         return payload
 
 

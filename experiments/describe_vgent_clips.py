@@ -58,6 +58,11 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--errors", required=True)
     parser.add_argument("--clip-count", type=int)
+    parser.add_argument(
+        "--all-clips",
+        action="store_true",
+        help="Describe every clip; pad a valid partial tail by repeating its last frame",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -67,10 +72,14 @@ def main() -> None:
     if frames_per_request != 64:
         raise ValueError("This VGent pilot requires exactly 64 frames per request")
     plan = load_video_plan(args.manifest)
-    selected = select_even_full_clips(
-        plan.clips,
-        clip_count,
-        frames_per_request=frames_per_request,
+    selected = (
+        list(plan.clips)
+        if args.all_clips
+        else select_even_full_clips(
+            plan.clips,
+            clip_count,
+            frames_per_request=frames_per_request,
+        )
     )
     print(
         f"Selected clip indices: {[clip.clip_index for clip in selected]}", flush=True
@@ -104,7 +113,9 @@ def main() -> None:
                     "clip_index": clip.clip_index,
                     "start_seconds": clip.start_seconds,
                     "end_seconds": clip.end_seconds,
+                    "source_frames": len(clip.frame_paths),
                     "input_frames": frames_per_request,
+                    "padding_frames": frames_per_request - len(clip.frame_paths),
                     "model": describer.model,
                     "prompt_version": DESCRIPTION_PROMPT_VERSION,
                     "elapsed_seconds": round(time.monotonic() - started, 3),

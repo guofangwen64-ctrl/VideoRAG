@@ -3,6 +3,7 @@
 from .description import (
     DESCRIPTION_PROMPT_VERSION,
     OpenAICompatibleClipDescriber,
+    prepare_request_frame_paths,
     select_even_full_clips,
 )
 from .schemas import VgentClipPlan, VgentVideoPlan
@@ -25,6 +26,7 @@ __all__ = [
     "VgentSlicingPlanner",
     "VgentVideoPlan",
     "load_video_plan",
+    "prepare_request_frame_paths",
     "safe_video_key",
     "save_video_plan",
     "select_even_full_clips",

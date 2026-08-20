@@ -114,6 +114,8 @@ OPENAI_API_KEY=EMPTY python experiments/describe_vgent_clips.py \
   --errors artifacts/vgent_baseline/descriptions/<video>.errors.jsonl
 ```
 
+使用 `--all-clips` 可覆盖单视频全部 clip。若尾片段不足 64 帧，脚本只对已完整抽取的合法 partial clip 重复最后一帧补足请求长度，并在输出中记录源帧数与 padding 数量。
+
 ## 时间证据恢复
 
 公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。

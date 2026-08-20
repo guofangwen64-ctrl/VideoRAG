@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from medhorizon_videorag.vgent_baseline.description import select_even_full_clips
+from medhorizon_videorag.vgent_baseline.description import (
+    prepare_request_frame_paths,
+    select_even_full_clips,
+)
 from medhorizon_videorag.vgent_baseline.schemas import VgentClipPlan
 
 
@@ -52,3 +55,13 @@ def test_selects_ten_even_complete_clips_and_excludes_partial(tmp_path: Path) ->
 def test_rejects_insufficient_complete_clips(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="only 1 are available"):
         select_even_full_clips([_clip(tmp_path, 0)], 2, frames_per_request=64)
+
+
+def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
+    clip = _clip(tmp_path, 87, 60)
+
+    request_paths = prepare_request_frame_paths(clip, frames_per_request=64)
+
+    assert len(request_paths) == 64
+    assert request_paths[:60] == clip.frame_paths
+    assert request_paths[60:] == [clip.frame_paths[-1]] * 4
