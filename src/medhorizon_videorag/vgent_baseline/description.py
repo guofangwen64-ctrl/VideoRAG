@@ -10,7 +10,7 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v5"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v6"
 
 OBSERVATION_FIRST_SYSTEM_PROMPT = """You are a literal visual transcription system.
 The summary and observed_facts must contain only directly visible appearance,
@@ -23,7 +23,11 @@ Do not infer a medical action from generic instrument-tissue interaction.
 medical_inferences must be [] unless distinctive visual evidence supports an
 interpretation. Never use video titles, metadata, or neighboring-clip context.
 Return only the requested JSON object. Before responding, silently check the
-summary for every forbidden word and rewrite it if any is present."""
+summary for every forbidden word and rewrite it if any is present.
+The summary must be exactly one short sentence of at most 30 words in the form
+of visible object, visible action, visible target, and visible appearance.
+Do not describe the scene type, medical purpose, procedural context, skill,
+precision, or delicacy. medical_inferences should usually be []."""
 
 DESCRIPTION_PROMPT = """You are analyzing a short clip from a long medical procedure video.
 
@@ -38,6 +42,9 @@ Apply the observation-first rules before writing any JSON:
   and spatial relationships instead.
 - If there is no distinctive visual evidence for a medical interpretation,
   return an empty medical_inferences array.
+- Write the summary as exactly one sentence of at most 30 words. Mention only
+  visible objects, actions, targets, colors, shapes, materials, and motion.
+  Do not describe the scene type, purpose, precision, or procedural context.
 
 IMPORTANT:
 Separate direct visual observations from medical interpretations.

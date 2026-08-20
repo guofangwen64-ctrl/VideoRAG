@@ -71,7 +71,7 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
 
 
 def test_observation_first_prompt_contract() -> None:
-    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v5"
+    assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v6"
     assert "The summary MUST contain only directly visible information." in (
         DESCRIPTION_PROMPT
     )
@@ -83,3 +83,6 @@ def test_observation_first_prompt_contract() -> None:
     assert "The action may represent suturing." not in DESCRIPTION_PROMPT
     assert "literal visual transcription system" in OBSERVATION_FIRST_SYSTEM_PROMPT
     assert "silently check the" in OBSERVATION_FIRST_SYSTEM_PROMPT
+    assert "exactly one short sentence of at most 30 words" in (
+        OBSERVATION_FIRST_SYSTEM_PROMPT
+    )
