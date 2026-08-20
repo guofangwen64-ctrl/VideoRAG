@@ -10,7 +10,7 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_inference_v2"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v3"
 
 DESCRIPTION_PROMPT = """You are analyzing a short clip from a long medical procedure video.
 
@@ -93,8 +93,39 @@ Do not infer a specific surgical phase from ambiguous local visual evidence.
 If a phase is suggested, include it only under medical_inferences.
 
 5. SUMMARY
-Summarize primarily the directly visible activity.
-Avoid unsupported anatomical or procedural claims."""
+The summary MUST contain only directly visible activity.
+Avoid unsupported anatomical or procedural claims.
+
+OBSERVATION-FIRST RULES:
+
+1. The summary MUST contain only directly visible information.
+   Never use "possibly", "likely", "may", or inferred medical terminology
+   in the summary.
+
+2. observed_facts MUST contain only visually verifiable facts.
+
+3. Describe appearance before interpretation:
+   - "red fluid" instead of "active bleeding"
+   - "clear fluid" instead of "irrigation fluid"
+   - "thread-like material" instead of "suture"
+   - "tubular structure" instead of "blood vessel"
+   - "reddish tissue" instead of "inflamed tissue"
+
+4. Do not infer suturing, dissection, resection, repair, ligation,
+   or other surgical actions from generic tissue manipulation alone.
+
+5. A medical inference requires distinctive visual evidence.
+   Generic evidence such as "instrument near tissue" is insufficient.
+
+6. If evidence is insufficient, omit the inference rather than guessing.
+
+7. Confidence:
+   high = multiple distinctive visual cues
+   medium = at least one distinctive cue, alternatives remain
+   low = weak or contextual evidence only
+
+8. Do not use external context, video title, dataset metadata,
+   expected procedure type, or assumptions about neighboring clips."""
 
 
 def select_even_full_clips(
