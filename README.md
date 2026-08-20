@@ -116,7 +116,7 @@ OPENAI_API_KEY=EMPTY python experiments/describe_vgent_clips.py \
 
 使用 `--all-clips` 可覆盖单视频全部 clip。若尾片段不足 64 帧，脚本只对已完整抽取的合法 partial clip 重复最后一帧补足请求长度，并在输出中记录源帧数与 padding 数量。
 
-若使用 ModelScope 的 Qwen3.5-27B 做限额对比，使用独立配置和脚本，不改变本地 Qwen2.5-VL baseline。该脚本固定选择 20 个完整 clip，并关闭 SDK 自动重试和摘要二次改写，使每个 clip 最多发起一次模型请求：
+若使用 ModelScope 的 Qwen3.5-27B 做限额对比，使用独立配置和脚本，不改变本地 Qwen2.5-VL baseline。该脚本固定选择 20 个完整 clip，关闭 SDK 自动重试和摘要二次改写，并在首个失败后立即停止，使每个 clip 最多发起一次模型请求：
 
 ```bash
 export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'

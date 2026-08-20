@@ -14,5 +14,6 @@ python experiments/describe_vgent_clips.py \
   --config configs/vgent_modelscope_qwen35_27b.yaml \
   --manifest "${MANIFEST}" \
   --clip-indices "${CLIP_INDICES}" \
+  --fail-fast \
   --output "${OUTPUT_DIR}/descriptions.jsonl" \
   --errors "${OUTPUT_DIR}/errors.jsonl"

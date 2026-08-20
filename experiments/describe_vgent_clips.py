@@ -69,6 +69,11 @@ def main() -> None:
         action="store_true",
         help="Describe every clip; pad a valid partial tail by repeating its last frame",
     )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop after the first failed request instead of continuing the batch",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -164,6 +169,8 @@ def main() -> None:
                 f"[{number}/{len(selected)}] {clip.id}: FAILED {_safe_error(error)}",
                 flush=True,
             )
+            if args.fail_fast:
+                raise
     print(
         f"Finished: {succeeded} described, {resumed} resumed, {failed} failed",
         flush=True,
