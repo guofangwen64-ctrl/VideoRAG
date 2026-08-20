@@ -204,6 +204,7 @@ class OpenAICompatibleClipDescriber:
             messages=[{"role": "user", "content": content}],
             temperature=0,
             max_tokens=self.max_tokens,
+            response_format={"type": "json_object"},
         )
         text = response.choices[0].message.content or ""
         payload = _parse_json_object(text)
