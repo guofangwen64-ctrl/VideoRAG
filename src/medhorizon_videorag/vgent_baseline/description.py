@@ -11,7 +11,7 @@ from typing import Any
 
 from .schemas import VgentClipPlan
 
-DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v7"
+DESCRIPTION_PROMPT_VERSION = "medical_clip_observation_first_v8"
 
 SUMMARY_FORBIDDEN_TERMS = (
     "possibly",
@@ -19,6 +19,7 @@ SUMMARY_FORBIDDEN_TERMS = (
     "may",
     "blood",
     "bleeding",
+    "surgical",
     "surgical field",
     "surgical work",
     "procedure",
@@ -37,7 +38,7 @@ OBSERVATION_FIRST_SYSTEM_PROMPT = """You are a literal visual transcription syst
 The summary and observed_facts must contain only directly visible appearance,
 motion, and spatial relationships. In the summary, never use possibly, likely,
 may, blood, bleeding, surgical field, surgical work, procedure, suture,
-suturing, irrigation, blood vessel, inflamed, dissection, resection, repair,
+surgical, suturing, irrigation, blood vessel, inflamed, dissection, resection, repair,
 or ligation. Use generic appearance-first terms such as red fluid, clear fluid,
 thread-like material, tubular structure, reddish tissue, and instrument.
 Do not infer a medical action from generic instrument-tissue interaction.
