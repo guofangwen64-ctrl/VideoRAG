@@ -225,6 +225,8 @@ class OpenAICompatibleGraphQA:
             raw_ids = payload.get("event_ids")
         except RuntimeError:
             raw_ids = re.findall(r"event:[A-Za-z0-9_-]+:\d{5}", text)
+        if isinstance(raw_ids, str):
+            raw_ids = [raw_ids]
         if not isinstance(raw_ids, list):
             raise TypeError(f"Event reranker returned invalid event_ids: {text}")
         event_ids = []
