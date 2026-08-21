@@ -61,6 +61,10 @@ Graph-RAG 不替换或改写现有 baseline。只有在小规模实验中验证�
 
 builder 只消费 observation-first `observed_facts`，构建 clip、entity mention、canonical concept、action event 和 temporal event。v2 将动作限制在有限词表内，将颜色、外观、形状、尺寸和材质从基础实体 concept 中拆分到 mention attributes，并支持 `pass_through -> pull -> tighten` 等可审计动作转移。v2.1 为每个 event 新增带分量的 structural support score，并确定性选择最多 3 个代表 clip，用于后续检索排序与 Reader 证据预算。原始 observation 与帧指针保存在 clip 节点；医学推断不进入图事实。跨 clip 实体仅允许 `possible_continuation` 弱关系，避免在缺少视觉跟踪证据时错误合并物理实体。
 
+### 阶段 1.6：确定性 event 图检索（v1 已实现）
+
+首版检索不依赖 LLM 或向量模型：复用 action/entity normalization 得到查询词，以 IDF 降低高频泛化实体的影响，在 temporal event 上聚合动作、实体、属性、clip lexical match、structural support 和 representative coverage。明确 `after` / `before` 时允许沿 event-level `temporal_before` 边做定向扩展；其他扩展必须增加查询词覆盖。输出保留 event、clip、时间和帧路径，并暴露每项分数与 reasoning path。该阶段只验证图检索链路，不声称完成医学多跳推理。
+
 ### 阶段 2：数据协议
 
 构建一批不泄漏时间信息、人工核验且有一个或多个证据区间的问题。优先覆盖多跳、因果、时序顺序、跨阶段和器械—动作关联。

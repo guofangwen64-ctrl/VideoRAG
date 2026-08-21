@@ -1,6 +1,6 @@
 # MedHorizon VideoRAG
 
-面向医学长视频 QA 的可扩展研究工程。当前完整保留 VideoRAG baseline，并新增了与 baseline 隔离的 observation-first 证据图 builder。图检索、多跳推理与 Agent 尚未实现。
+面向医学长视频 QA 的可扩展研究工程。当前完整保留 VideoRAG baseline，并新增了与 baseline 隔离的 observation-first 证据图 builder 和确定性 event 图检索器。VLM 验证、多跳回答与 Agent 尚未实现。
 
 ## 研究管线边界
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `baseline` | 已实现、可运行 | 固定 chunk、CLIP/时间检索和 VLM Reader；继续作为可复现对照 |
 | `vgent_baseline` | 1 FPS 切片、流式抽帧与结构化 clip 描述已实现 | 复现 VGent 的每 64 个采样帧一组，并对比无上限医学长视频适配与官方采样上限 |
-| `medical_graph_rag` | v2.1 可追溯证据图 builder 已实现；检索尚未实现 | 将 observation 规范化为 mention、action、concept 与 temporal event，随后研究多跳证据检索与医学问答 |
+| `medical_graph_rag` | v2.1 可追溯证据图和确定性 event 检索 v1 已实现 | 将 observation 规范化为 mention、action、concept 与 temporal event，检索可追溯代表 clips，随后研究 VLM 验证与医学问答 |
 
 现有 `medrag` CLI 仍然只运行原 baseline。VGent 前期验证使用独立脚本和 `artifacts/vgent_baseline/`；证据图也使用独立实验入口，不改变 baseline CLI。Graph-RAG 的研究假设、阶段计划和工程边界见 [docs/graph_rag_research_plan.md](docs/graph_rag_research_plan.md)，无时间泄漏、多证据区间 QA 的标注与评估协议见 [docs/medical_graph_qa_protocol.md](docs/medical_graph_qa_protocol.md)。
 
@@ -146,9 +146,23 @@ python experiments/build_evidence_graph.py \
 - `evidence_graph.json`：包含 clip、mention、concept、action event、temporal event 及其证据边；
 - `graph_report.json`：节点、边、合并率、缺失帧路径和高频概念统计。
 
-每个非 clip 节点通过 `observed_in`、`contains` 或 `part_of` 回溯到 clip；只有 clip 节点保存完整帧路径，避免在图 JSON 中重复数千次相同路径。该版本尚不包含问题检索和高层医学推理。
+每个非 clip 节点通过 `observed_in`、`contains` 或 `part_of` 回溯到 clip；只有 clip 节点保存完整帧路径，避免在图 JSON 中重复数千次相同路径。该版本不包含高层医学推理。
 
 `structural_support_score` 只表示图内连续性、实体/角色一致性与 observation specificity，不是医学事实正确率。singleton 和 merged event 使用不同 `support_mode`。representative evidence 只保存 clip ID、时间区间、覆盖动作/实体和选择理由，帧仍从 clip 节点追溯。可用 `--max-representative-clips` 覆盖默认上限 3。
+
+## 确定性 event 图检索 v1
+
+第一版检索器不调用 LLM 或 embedding。它复用建图时的有限 action/entity vocabulary，将问题规范化后检索 temporal events，并使用动作/实体覆盖、词项稀有度、可见属性、clip 文本、event structural support 和代表证据覆盖率排序。`after` / `before` 问题可沿 `temporal_before` 边扩展一个或多个相邻 event；跨 event 扩展只在补充查询词或满足明确方向上下文时发生。
+
+```bash
+python experiments/retrieve_evidence_graph.py \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --question "What happens after the needle-like instrument passes through tissue?" \
+  --question-id demo-001 \
+  --top-k 5
+```
+
+也可通过 `--questions-jsonl` 批量输入包含 `id`、`question` 和可选 `video_id` 的问题，并用 `--output` 写入新的 JSONL。输出包含规范化查询、event group 排名、分数组成、显式 reasoning path、代表 clip 时间区间和原始帧路径。当前分数是确定性检索分数，不是医学正确率；该入口与原 `medrag retrieve` baseline 保持隔离。
 
 ## 时间证据恢复
 

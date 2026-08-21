@@ -5,7 +5,7 @@ project:
   artifact_dir: artifacts/graph_rag
 pipeline:
   name: medical_graph_rag
-  status: evidence_graph_v2_1_runnable
+  status: evidence_graph_v2_1_with_deterministic_retrieval
   baseline_compatible: true
 data:
   # Supply on the server through a local, untracked override or a future CLI flag.
@@ -35,10 +35,15 @@ graph:
     event_representative_evidence: true
     use_medical_inferences: false
 retrieval:
-  strategy: graph_multi_hop
+  strategy: deterministic_event_graph_v1
   initial_candidates: 20
-  max_hops: 3
+  max_hops: 2
+  top_k: 5
   max_verified_intervals: 5
+  max_representatives_per_event: 2
+  query_normalization: finite_action_entity_vocabulary
+  event_structural_support_weight: 0.10
+  query_aware_representative_reranking: true
   visual_fallback: true
 llm:
   provider: not_configured
