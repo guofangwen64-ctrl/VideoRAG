@@ -164,6 +164,20 @@ python experiments/retrieve_evidence_graph.py \
 
 也可通过 `--questions-jsonl` 批量输入包含 `id`、`question` 和可选 `video_id` 的问题，并用 `--output` 写入新的 JSONL。输出包含规范化查询、event group 排名、分数组成、显式 reasoning path、代表 clip 时间区间和原始帧路径。当前分数是确定性检索分数，不是医学正确率；该入口与原 `medrag retrieve` baseline 保持隔离。
 
+小规模 Graph-QA 诊断可让同一个 OpenAI-compatible VLM 先对 observation events 做文本重排，再读取 event onset/representative frames 回答多选题。对原本含明确时间区间的问题，脚本会从模型看到的题干中删除时间文本，但仍把该区间作为视觉取帧依据；无时间题不会使用人工时间窗口。
+
+```bash
+OPENAI_API_KEY=EMPTY python experiments/evaluate_graph_qa_qwen25vl.py \
+  --annotations medhorizon_test.jsonl \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --video-key <video> \
+  --qa-uids 0,1,2,3,4,5 \
+  --video-root /path/to/MedHorizon \
+  --output-dir artifacts/graph_rag/<video>/<run>
+```
+
+该实验会保存清理前后题干、route、Qwen event 排名、证据 clip、帧路径、预测和理由，便于把时间窗口 Reader 与无时间图检索分别诊断。它是研究实验入口，不改变原 baseline QA 协议。
+
 ## 时间证据恢复
 
 公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。

@@ -28,6 +28,13 @@ from .evidence_builder import (
     write_evidence_graph_artifacts,
 )
 from .ports import EvidenceVerifier, GraphBuilder, GraphRetriever, GraphStore
+from .qa_experiment import (
+    GRAPH_QA_EXPERIMENT_VERSION,
+    OpenAICompatibleGraphQA,
+    build_event_observation_catalog,
+    select_event_frame_groups,
+    strip_explicit_time_range,
+)
 from .retrieval import (
     RETRIEVER_VERSION,
     DeterministicEventGraphRetriever,
@@ -49,6 +56,7 @@ __all__ = [
     "BUILDER_VERSION",
     "ENTITY_VOCABULARY",
     "EVENT_SUPPORT_VERSION",
+    "GRAPH_QA_EXPERIMENT_VERSION",
     "GRAPH_SCHEMA_VERSION",
     "REPRESENTATIVE_EVIDENCE_VERSION",
     "RETRIEVER_VERSION",
@@ -67,8 +75,10 @@ __all__ = [
     "NormalizedClip",
     "NormalizedGraphQuery",
     "NormalizedMention",
+    "OpenAICompatibleGraphQA",
     "TemporalEvent",
     "VideoEvidenceGraph",
+    "build_event_observation_catalog",
     "build_evidence_graph",
     "load_description_rows",
     "load_evidence_graph",
@@ -78,5 +88,7 @@ __all__ = [
     "normalize_description_rows",
     "normalize_entity",
     "normalize_graph_query",
+    "select_event_frame_groups",
+    "strip_explicit_time_range",
     "write_evidence_graph_artifacts",
 ]
