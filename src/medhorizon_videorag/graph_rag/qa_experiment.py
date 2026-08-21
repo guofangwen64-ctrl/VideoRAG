@@ -61,17 +61,27 @@ def build_event_observation_catalog(graph: VideoEvidenceGraph) -> list[dict[str,
                 str(item) for item in event.metadata.get("supporting_clip_ids", [])[:1]
             ]
         observations = []
-        for clip_id in representative_ids[:3]:
+        for clip_id in representative_ids[:1]:
             clip = clips.get(clip_id)
             if clip is None:
                 continue
             facts = clip.metadata.get("observation", {}).get("observed_facts", {})
+            actions = [
+                " ".join(
+                    str(action.get(field, "")).strip()
+                    for field in ("subject", "action", "target")
+                    if str(action.get(field, "")).strip()
+                )
+                for action in facts.get("actions", [])[:4]
+                if isinstance(action, dict)
+            ]
             observations.append(
                 {
                     "summary": clip.label,
-                    "visible_instruments": list(facts.get("visible_instruments", [])),
-                    "actions": list(facts.get("actions", [])),
-                    "state_changes": list(facts.get("state_changes", [])),
+                    "visible_instruments": list(
+                        facts.get("visible_instruments", [])[:4]
+                    ),
+                    "actions": actions,
                 }
             )
         catalog.append(
@@ -189,7 +199,7 @@ class OpenAICompatibleGraphQA:
             "You are retrieving evidence from an observation-first graph of one long "
             "medical procedure video. The graph deliberately contains no surgical phase "
             "labels. Infer which temporal events are most relevant to the question from "
-            "their visible instruments, generic entities, actions, and state changes. "
+            "their visible instruments, generic entities, actions, and summaries. "
             "Do not answer the multiple-choice question yet. Select the best event IDs "
             f"in ranked order, with at most {top_events} IDs. Return only JSON with keys "
             "event_ids and rationale.\nQuestion: "
