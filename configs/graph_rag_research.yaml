@@ -5,7 +5,7 @@ project:
   artifact_dir: artifacts/graph_rag
 pipeline:
   name: medical_graph_rag
-  status: evidence_graph_v1_runnable
+  status: evidence_graph_v2_runnable
   baseline_compatible: true
 data:
   # Supply on the server through a local, untracked override or a future CLI flag.
@@ -18,7 +18,7 @@ chunking:
   event_window_seconds: 32
   event_stride_seconds: 16
 graph:
-  schema_version: medical-video-evidence-graph-v1
+  schema_version: medical-video-evidence-graph-v2
   scope: intra_video
   node_types: [segment, entity_mention, concept, action_event, temporal_event]
   edge_types: [temporal_before, contains, observed_in, instance_of, has_subject, acts_on, part_of, possible_continuation]
@@ -27,6 +27,9 @@ graph:
     require_grounded_intervals: true
     merge_threshold: 0.45
     max_merged_clips: 5
+    finite_action_vocabulary: true
+    separate_entity_attributes: true
+    action_transition_merging: true
     use_medical_inferences: false
 retrieval:
   strategy: graph_multi_hop

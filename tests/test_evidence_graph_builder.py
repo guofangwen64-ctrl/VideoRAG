@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 
 from medhorizon_videorag.graph_rag import (
+    ACTION_VOCABULARY,
+    ENTITY_VOCABULARY,
+    GRAPH_SCHEMA_VERSION,
     build_evidence_graph,
     merge_temporal_events,
     normalize_action,
@@ -62,10 +65,44 @@ def test_normalization_is_conservative_and_splits_compound_actions() -> None:
     assert normalize_action("passes thread-like material through tissue") == (
         "pass_through",
     )
+    assert normalize_action("inserts") == ("insert",)
+    assert normalize_action("insert into") == ("insert",)
+    assert normalize_action("loops around tissue") == ("loop_around",)
+    assert normalize_action("forms loops around tissue") == ("loop_around",)
+    assert normalize_action("is pulled and tightened") == ("pull", "tighten")
+    assert normalize_action("unrecognized activity wording") == ("other_action",)
+    assert all(
+        predicate in ACTION_VOCABULARY
+        for phrase in (
+            "inserts",
+            "insert into",
+            "forms loops around tissue",
+            "is pulled and tightened",
+            "unrecognized activity wording",
+        )
+        for predicate in normalize_action(phrase)
+    )
     assert normalize_entity("multiple thin blue thread-like materials")[:2] == (
         "thread_like_material",
         "material",
     )
+
+
+def test_entity_normalization_separates_base_concept_and_attributes() -> None:
+    canonical, category, attributes = normalize_entity(
+        "yellowish fatty-looking material"
+    )
+    assert (canonical, category) == ("generic_material", "material")
+    assert attributes == {
+        "color": ["yellow"],
+        "appearance": ["fatty-looking"],
+    }
+    canonical, category, attributes = normalize_entity("small white square object")
+    assert (canonical, category) == ("generic_object", "object")
+    assert attributes["color"] == ["white"]
+    assert attributes["shape"] == ["square"]
+    assert attributes["size"] == ["small"]
+    assert canonical in ENTITY_VOCABULARY
 
 
 def test_temporal_merge_requires_action_and_entity_continuity() -> None:
@@ -93,6 +130,86 @@ def test_temporal_merge_requires_action_and_entity_continuity() -> None:
     ]
 
 
+def test_temporal_merge_supports_compatible_action_sequence() -> None:
+    rows = [
+        _row(
+            0,
+            action="passes through tissue",
+            subject="needle-like instrument",
+            target="reddish tissue",
+        ),
+        _row(
+            1,
+            action="pulls thread-like material",
+            subject="metal forceps",
+            target="thread-like material",
+        ),
+        _row(
+            2,
+            action="tightens",
+            subject="thread-like material",
+            target="tubular structure",
+        ),
+    ]
+    events = merge_temporal_events(normalize_description_rows(rows))
+
+    assert len(events) == 1
+    assert events[0].supporting_clip_ids == [
+        "case_vgent_00000",
+        "case_vgent_00001",
+        "case_vgent_00002",
+    ]
+    assert [detail["action_relation"] for detail in events[0].merge_details] == [
+        "transition",
+        "transition",
+    ]
+    assert events[0].merge_details[0]["compatible_transitions"] == [
+        ["pass_through", "pull"]
+    ]
+
+
+def test_temporal_merge_rejects_transition_supported_only_by_generic_entities() -> None:
+    rows = [
+        _row(
+            0,
+            action="passes through",
+            subject="instrument",
+            target="tissue",
+        ),
+        _row(1, action="pulls", subject="instrument", target="tissue"),
+    ]
+    for row in rows:
+        facts = row["description"]["observed_facts"]
+        facts["visible_anatomy"] = ["tissue"]
+        facts["visible_instruments"] = ["instrument"]
+        facts["visible_objects"] = []
+
+    events = merge_temporal_events(normalize_description_rows(rows))
+
+    assert len(events) == 2
+
+
+def test_temporal_merge_binds_exact_action_to_matching_roles() -> None:
+    rows = [
+        _row(
+            0,
+            action="holds",
+            subject="metal forceps",
+            target="tubular structure",
+        ),
+        _row(
+            1,
+            action="holds",
+            subject="needle-like instrument",
+            target="thread-like material",
+        ),
+    ]
+
+    events = merge_temporal_events(normalize_description_rows(rows))
+
+    assert len(events) == 2
+
+
 def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
     tmp_path: Path,
 ) -> None:
@@ -114,9 +231,15 @@ def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
     artifacts = build_evidence_graph(rows, frame_paths_by_clip=frame_paths)
     graph = artifacts.graph
     clip_node = next(node for node in graph.nodes if node.id == "clip:case_vgent_00000")
+    thread_concept = next(
+        node
+        for node in graph.nodes
+        if node.id == "concept:material:thread_like_material"
+    )
 
     assert clip_node.metadata["observation"]["medical_inferences"]
     assert graph.metadata["medical_inferences_used"] is False
+    assert thread_concept.metadata["attribute_counts"]["color"]["blue"] == 2
     assert clip_node.evidence[0].frame_paths == frame_paths["case_vgent_00000"]
     assert any(edge.relation == "observed_in" for edge in graph.edges)
     assert any(edge.relation == "instance_of" for edge in graph.edges)
@@ -128,5 +251,6 @@ def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
     write_evidence_graph_artifacts(artifacts, output)
     payload = json.loads((output / "evidence_graph.json").read_text())
     normalized = (output / "normalized_observations.jsonl").read_text()
-    assert payload["schema_version"] == "medical-video-evidence-graph-v1"
+    assert payload["schema_version"] == GRAPH_SCHEMA_VERSION
     assert "medical_inferences_excluded_from_graph" in normalized
+    assert artifacts.report["other_action_count"] == 0

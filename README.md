@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | `baseline` | 已实现、可运行 | 固定 chunk、CLIP/时间检索和 VLM Reader；继续作为可复现对照 |
 | `vgent_baseline` | 1 FPS 切片、流式抽帧与结构化 clip 描述已实现 | 复现 VGent 的每 64 个采样帧一组，并对比无上限医学长视频适配与官方采样上限 |
-| `medical_graph_rag` | 第一版可追溯证据图 builder 已实现；检索尚未实现 | 将 observation 规范化为 mention、action、concept 与 temporal event，随后研究多跳证据检索与医学问答 |
+| `medical_graph_rag` | 第二版可追溯证据图 builder 已实现；检索尚未实现 | 将 observation 规范化为 mention、action、concept 与 temporal event，随后研究多跳证据检索与医学问答 |
 
-现有 `medrag` CLI 仍然只运行原 baseline。VGent 前期验证使用独立脚本和 `artifacts/vgent_baseline/`；第一版证据图也使用独立实验入口，不改变 baseline CLI。Graph-RAG 的研究假设、阶段计划和工程边界见 [docs/graph_rag_research_plan.md](docs/graph_rag_research_plan.md)，无时间泄漏、多证据区间 QA 的标注与评估协议见 [docs/medical_graph_qa_protocol.md](docs/medical_graph_qa_protocol.md)。
+现有 `medrag` CLI 仍然只运行原 baseline。VGent 前期验证使用独立脚本和 `artifacts/vgent_baseline/`；证据图也使用独立实验入口，不改变 baseline CLI。Graph-RAG 的研究假设、阶段计划和工程边界见 [docs/graph_rag_research_plan.md](docs/graph_rag_research_plan.md)，无时间泄漏、多证据区间 QA 的标注与评估协议见 [docs/medical_graph_qa_protocol.md](docs/medical_graph_qa_protocol.md)。
 
 ## 安装
 
@@ -128,21 +128,21 @@ export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
 
 生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。
 
-## 第一版可追溯证据图
+## 第二版可追溯证据图
 
-证据图 builder 只使用 `observed_facts` 建图；`medical_inferences` 会保留在原始 clip metadata 中，但不会成为图事实。原始 clip 节点不会被 temporal merge 覆盖或删除。实体跨 clip 只标记为低置信 `possible_continuation`，不会直接断言是同一物理实体。
+证据图 builder 只使用 `observed_facts` 建图；`medical_inferences` 会保留在原始 clip metadata 中，但不会成为图事实。v2 将 action 映射到有限观察词表，将复合实体描述拆为基础 entity concept 与 mention attributes，并通过显式动作转移表支持 `pass_through -> pull -> tighten` 等连续事件。原始 clip 节点不会被 temporal merge 覆盖或删除。实体跨 clip 只标记为低置信 `possible_continuation`，不会直接断言是同一物理实体。
 
 ```bash
 python experiments/build_evidence_graph.py \
   --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \
   --manifest artifacts/vgent_baseline/<cache>/video_manifests/<video>.json \
-  --output-dir artifacts/graph_rag/<video>/evidence_graph_v1
+  --output-dir artifacts/graph_rag/<video>/evidence_graph_v2
 ```
 
 输出包括：
 
 - `normalized_observations.jsonl`：保留 surface form 的规范化 mention 与 action；
-- `temporal_events.jsonl`：相邻 clip 的派生事件分组；
+- `temporal_events.jsonl`：相邻 clip 的派生事件分组，包含逐次合并分数、动作关系与共享信息实体；
 - `evidence_graph.json`：包含 clip、mention、concept、action event、temporal event 及其证据边；
 - `graph_report.json`：节点、边、合并率、缺失帧路径和高频概念统计。
 

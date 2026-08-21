@@ -6,7 +6,10 @@ from observation-first clip descriptions. Retrieval remains a research stage.
 """
 
 from .evidence_builder import (
+    ACTION_VOCABULARY,
     BUILDER_VERSION,
+    ENTITY_VOCABULARY,
+    GRAPH_SCHEMA_VERSION,
     EvidenceGraphArtifacts,
     NormalizedAction,
     NormalizedClip,
@@ -32,7 +35,10 @@ from .schemas import (
 )
 
 __all__ = [
+    "ACTION_VOCABULARY",
     "BUILDER_VERSION",
+    "ENTITY_VOCABULARY",
+    "GRAPH_SCHEMA_VERSION",
     "EvidenceGraphArtifacts",
     "EvidenceInterval",
     "EvidenceVerifier",

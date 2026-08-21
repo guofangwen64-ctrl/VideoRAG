@@ -10,30 +10,162 @@ from typing import Any
 
 from .schemas import EvidenceInterval, GraphEdge, GraphNode, VideoEvidenceGraph
 
-BUILDER_VERSION = "observation-evidence-graph-v1"
+BUILDER_VERSION = "observation-evidence-graph-v2"
+GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v2"
 
-_COLOR_TERMS = (
-    "red",
-    "reddish",
-    "blue",
-    "white",
-    "whitish",
-    "yellow",
-    "yellowish",
-    "pink",
-    "pinkish",
-    "purple",
-    "orange",
-    "dark",
-    "clear",
-    "translucent",
-    "metallic",
+ACTION_VOCABULARY = frozenset(
+    {
+        "apply",
+        "attach",
+        "contact",
+        "cut",
+        "deliver",
+        "emit",
+        "grasp",
+        "guide",
+        "hold",
+        "insert",
+        "loop_around",
+        "manipulate",
+        "move",
+        "other_action",
+        "pass_through",
+        "pierce",
+        "position",
+        "press",
+        "pull",
+        "push",
+        "remove",
+        "tighten",
+    }
 )
 
+ENTITY_VOCABULARY = frozenset(
+    {
+        "clear_fluid",
+        "clip_like_object",
+        "cutting_instrument",
+        "drape",
+        "generic_instrument",
+        "generic_material",
+        "generic_object",
+        "generic_structure",
+        "grasping_instrument",
+        "grid_like_material",
+        "hand",
+        "membranous_structure",
+        "needle_like_instrument",
+        "opening",
+        "patch_material",
+        "probe_instrument",
+        "red_fluid",
+        "ring_like_object",
+        "suction_instrument",
+        "surface_region",
+        "thread_like_material",
+        "tissue",
+        "tissue_region",
+        "tubular_instrument",
+        "tubular_structure",
+    }
+)
+
+_ATTRIBUTE_RULES: dict[str, tuple[tuple[str, str], ...]] = {
+    "color": (
+        (r"\b(?:red|reddish)\b", "red"),
+        (r"\b(?:blue|bluish)\b", "blue"),
+        (r"\b(?:white|whitish)\b", "white"),
+        (r"\b(?:yellow|yellowish)\b", "yellow"),
+        (r"\b(?:pink|pinkish)\b", "pink"),
+        (r"\bpurple\b", "purple"),
+        (r"\borange\b", "orange"),
+        (r"\bblack\b", "black"),
+        (r"\bdark\b", "dark"),
+        (r"\bpale\b", "pale"),
+    ),
+    "appearance": (
+        (r"\bfatty-looking\b", "fatty-looking"),
+        (r"\b(?:glossy|glistening|shiny)\b", "glossy"),
+        (r"\bsmooth\b", "smooth"),
+        (r"\bmoist\b", "moist"),
+        (r"\bfibrous\b", "fibrous"),
+        (r"\bgranular\b", "granular"),
+        (r"\btextured\b", "textured"),
+        (r"\bporous\b", "porous"),
+        (r"\birregular(?:ly shaped)?\b", "irregular"),
+        (r"\b(?:clear|transparent|translucent)\b", "translucent"),
+    ),
+    "shape": (
+        (r"\b(?:tubular|tube-like|cylindrical)\b", "tubular"),
+        (r"\b(?:rounded|round)\b", "round"),
+        (r"\boval(?:-shaped)?\b", "oval"),
+        (r"\bcircular\b", "circular"),
+        (r"\b(?:ring-like|ring)\b", "ring"),
+        (r"\b(?:lobed|lobulated)\b", "lobed"),
+        (r"\bsquare\b", "square"),
+        (r"\brectangular\b", "rectangular"),
+        (r"\bflat\b", "flat"),
+        (r"\bcurved\b", "curved"),
+        (r"\bpointed\b", "pointed"),
+        (r"\bserrated\b", "serrated"),
+        (r"\bbranching\b", "branching"),
+    ),
+    "size": (
+        (r"\bsmall\b", "small"),
+        (r"\bthin\b", "thin"),
+        (r"\blong\b", "long"),
+    ),
+    "material": (
+        (r"\b(?:metal|metallic)\b", "metal"),
+        (r"\bplastic\b", "plastic"),
+    ),
+}
+
 _ENTITY_RULES: tuple[tuple[str, str, str], ...] = (
+    (r"\bmesh-covered tubular structure\b", "tubular_structure", "anatomy"),
+    (
+        r"\b(?:suture|thread|strands?)(?:-like)?(?: materials?)?\b",
+        "thread_like_material",
+        "material",
+    ),
+    (
+        r"\b(?:mesh|mesh-like|grid-like)(?: structures?| materials?| rings?| coverings?)?\b",
+        "grid_like_material",
+        "material",
+    ),
+    (
+        r"\bblood\b(?!\s+vessels?\b)|\bred fluid(?: droplets?| pools?| streaks?)?\b",
+        "red_fluid",
+        "object",
+    ),
+    (r"\bclear fluid(?: droplets?)?\b", "clear_fluid", "object"),
+    (
+        r"\b(?:forceps|grasper|clamp|needle holder)(?:-like)?\b",
+        "grasping_instrument",
+        "instrument",
+    ),
+    (r"\bneedle-like instrument\b", "needle_like_instrument", "instrument"),
+    (
+        r"\b(?:scissors?|scissor-like tool|cutting instrument|blade-like instrument)\b",
+        "cutting_instrument",
+        "instrument",
+    ),
+    (
+        r"\b(?:suction|aspiration) (?:instrument|tool|tube)\b",
+        "suction_instrument",
+        "instrument",
+    ),
+    (r"\b(?:probe|orange-tipped tool)\b", "probe_instrument", "instrument"),
+    (
+        r"\b(?:tubular|tube-like|cylindrical|clear|red) (?:instrument|tool|device|tube)\b|\btubular access port\b",
+        "tubular_instrument",
+        "instrument",
+    ),
+    (r"\b(?:instrument|tool)s?(?: with [^,]+)?\b", "generic_instrument", "instrument"),
     (r"\b(?:blood\s+)?vessels?\b", "tubular_structure", "anatomy"),
     (r"\btubular (?:structure|object)s?\b", "tubular_structure", "anatomy"),
-    (r"\b(?:organ|body cavity|cavity)\b", "tissue_region", "anatomy"),
+    (r"\b(?:opening|cavity)\b", "opening", "anatomy"),
+    (r"\b(?:organ|body cavity|surgical site)\b", "tissue_region", "anatomy"),
     (
         r"\bmembran(?:e|ous)(?: layer| structure| surface)?s?\b",
         "membranous_structure",
@@ -44,68 +176,137 @@ _ENTITY_RULES: tuple[tuple[str, str, str], ...] = (
         "tissue",
         "anatomy",
     ),
-    (r"\b(?:metal(?:lic)? )?forceps\b", "grasping_instrument", "instrument"),
     (
-        r"\b(?:metal(?:lic)? )?(?:grasper|grasping (?:instrument|tool))\b",
-        "grasping_instrument",
-        "instrument",
-    ),
-    (r"\bneedle-like instrument\b", "needle_like_instrument", "instrument"),
-    (
-        r"\b(?:metal(?:lic)? )?(?:scissors|cutting instrument)\b",
-        "cutting_instrument",
-        "instrument",
-    ),
-    (r"\bprobe\b", "probe_instrument", "instrument"),
-    (
-        r"\b(?:suction|aspiration) (?:instrument|tool|tube)\b",
-        "suction_instrument",
-        "instrument",
-    ),
-    (r"\b(?:instrument|tool)s?(?: with [^,]+)?\b", "generic_instrument", "instrument"),
-    (
-        r"\b(?:suture|(?:(?:multiple|thin|blue|white|dark)\s+)*thread-like materials?)\b",
-        "thread_like_material",
+        r"\b(?:patch|square material|rectangular material)\b",
+        "patch_material",
         "material",
     ),
-    (
-        r"\b(?:mesh|mesh-like|grid-like)(?: structures?| materials?| rings?| coverings?)?\b",
-        "grid_like_material",
-        "material",
-    ),
-    (r"\bblood\b|\bred fluid(?: droplets?)?\b", "red_fluid", "object"),
-    (r"\bclear fluid(?: droplets?)?\b", "clear_fluid", "object"),
+    (r"\b(?:clip|anchor)\b", "clip_like_object", "object"),
+    (r"\bring-like object\b|\bwhite ring\b", "ring_like_object", "object"),
+    (r"\b(?:gloved )?hand\b", "hand", "object"),
+    (r"\b(?:drape|gown)s?\b", "drape", "object"),
+    (r"\bsurfaces?\b", "surface_region", "anatomy"),
 )
 
 _ACTION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        r"\b(?:is |being )?pull(?:s|ed|ing)? and (?:tighten(?:s|ed|ing)?|tension(?:s|ed|ing)?)\b",
+        ("pull", "tighten"),
+    ),
+    (
+        r"\b(?:is |being )?loop(?:s|ed|ing)? and (?:tighten(?:s|ed|ing)?|tension(?:s|ed|ing)?)\b",
+        ("loop_around", "tighten"),
+    ),
+    (
+        r"\b(?:is |being )?pull(?:s|ed|ing)? and loop(?:s|ed|ing)?\b",
+        ("pull", "loop_around"),
+    ),
     (r"\bgrasp(?:s|ed|ing)? and pull(?:s|ed|ing)?\b", ("grasp", "pull")),
-    (r"\binsert(?:s|ed|ing)? and guid(?:e|es|ed|ing)?\b", ("insert_into", "guide")),
+    (r"\bgrasp(?:s|ed|ing)? and retract(?:s|ed|ing)?\b", ("grasp", "pull")),
+    (r"\bhold(?:s|ing)? and pull(?:s|ed|ing)?\b", ("hold", "pull")),
+    (r"\bgrasp(?:s|ed|ing)? and hold(?:s|ing)?\b", ("grasp", "hold")),
+    (r"\bhold(?:s|ing)? and retract(?:s|ed|ing)?\b", ("hold", "pull")),
+    (r"\bpull(?:s|ed|ing)? and retract(?:s|ed|ing)?\b", ("pull",)),
+    (r"\bpull(?:s|ed|ing)? and position(?:s|ed|ing)?\b", ("pull", "position")),
+    (r"\bhold(?:s|ing)? and position(?:s|ed|ing)?\b", ("hold", "position")),
+    (r"\bhold(?:s|ing)? and guid(?:e|es|ed|ing)?\b", ("hold", "guide")),
+    (r"\bhold(?:s|ing)? and maneuver(?:s|ed|ing)?\b", ("hold", "manipulate")),
+    (r"\bpush(?:es|ed|ing)? and guid(?:e|es|ed|ing)?\b", ("push", "guide")),
+    (r"\bpush(?:es|ed|ing)? and pull(?:s|ed|ing)?\b", ("push", "pull")),
+    (r"\binsert(?:s|ed|ing)? and guid(?:e|es|ed|ing)?\b", ("insert", "guide")),
+    (r"\binsert(?:s|ed|ing)? and pull(?:s|ed|ing)?\b", ("insert", "pull")),
+    (
+        r"\bcontact(?:s|ed|ing)? and manipulat(?:e|es|ed|ing)\b",
+        ("contact", "manipulate"),
+    ),
+    (r"\bemit(?:s|ted|ting)? [^,]* and contact(?:s|ed|ing)?\b", ("emit", "contact")),
+    (r"\bgrasp(?:s|ed|ing)? and adjust(?:s|ed|ing)?\b", ("grasp", "manipulate")),
+    (r"\bpierc(?:e|es|ed|ing) and pull(?:s|ed|ing)?\b", ("pierce", "pull")),
     (
         r"\b(?:pass(?:es|ed|ing)?|push(?:es|ed|ing)?|insert(?:s|ed|ing)?)(?: [a-z-]+){0,4} through(?: tissue)?\b",
         ("pass_through",),
     ),
+    (r"\bpull(?:s|ed|ing)?(?: [a-z-]+){0,4} through(?: tissue)?\b", ("pass_through",)),
+    (r"\bmov(?:e|es|ed|ing) through\b", ("pass_through",)),
     (r"\bpass(?:es|ed|ing)?(?: thread-like material)?\b", ("pass_through",)),
-    (r"\binsert(?:s|ed|ing)? into(?: tissue)?\b", ("insert_into",)),
+    (r"\b(?:form(?:s|ed|ing)? )?loops? around(?: tissue)?\b", ("loop_around",)),
+    (r"\b(?:is |being )?loop(?:s|ed|ing)? around\b", ("loop_around",)),
+    (r"\barrang(?:e|es|ed|ing) around\b", ("loop_around",)),
+    (r"\bstretch(?:es|ed|ing)?\b|\bheld taut\b", ("tighten",)),
+    (r"\btighten(?:s|ed|ing)?\b|\btension(?:s|ed|ing)?\b", ("tighten",)),
+    (r"\bappl(?:y|ies|ied|ying) pressure\b", ("press",)),
+    (r"\binsert(?:s|ed|ing)?(?: into(?: tissue| opening)?)?\b", ("insert",)),
     (r"\bhold(?:s|ing)?(?: tissue)?\b", ("hold",)),
     (r"\bgrasp(?:s|ed|ing)?\b", ("grasp",)),
     (r"\bpull(?:s|ed|ing)?(?: thread-like material)?\b", ("pull",)),
-    (r"\bpress(?:es|ed|ing)? against(?: tissue)?\b", ("press_against",)),
+    (r"\bpress(?:es|ed|ing)?(?: against)?(?: tissue)?\b", ("press",)),
     (r"\bcontact(?:s|ed|ing)?\b", ("contact",)),
     (r"\btouch(?:es|ed|ing)?\b", ("contact",)),
     (r"\bmanipulat(?:e|es|ed|ing)\b", ("manipulate",)),
     (r"\bmov(?:e|es|ed|ing)\b", ("move",)),
     (r"\bretract(?:s|ed|ing)?\b", ("pull",)),
     (r"\bguid(?:e|es|ed|ing)?\b", ("guide",)),
-    (r"\bemit(?:s|ted|ting)?\b", ("emit",)),
+    (
+        r"\b(?:emit(?:s|ted|ting)?|expel(?:s|led|ling)?|releas(?:e|es|ed|ing))\b",
+        ("emit",),
+    ),
     (r"\bdeliver(?:s|ed|ing)?\b", ("deliver",)),
     (r"\bremov(?:e|es|ed|ing)\b", ("remove",)),
     (r"\bsecur(?:e|es|ed|ing)\b", ("attach",)),
+    (r"\battach(?:es|ed|ing)?\b", ("attach",)),
+    (r"\bplac(?:e|es|ed|ing) (?:on|onto)\b", ("position",)),
+    (r"\bposition(?:s|ed|ing)?\b", ("position",)),
+    (r"\bpush(?:es|ed|ing)?\b", ("push",)),
+    (r"\bpierc(?:e|es|ed|ing)\b", ("pierce",)),
+    (r"\bcut(?:s|ting)?\b", ("cut",)),
     (r"\bappl(?:y|ies|ied|ying)\b", ("apply",)),
 )
 
 _MERGE_STOP_CONCEPTS = frozenset(
-    {"tissue", "tissue_region", "generic_instrument", "red_fluid", "clear_fluid"}
+    {
+        "clear_fluid",
+        "generic_instrument",
+        "generic_material",
+        "generic_object",
+        "generic_structure",
+        "red_fluid",
+        "surface_region",
+        "tissue",
+        "tissue_region",
+    }
 )
+
+_ACTION_TRANSITION_SUPPORT = {
+    ("grasp", "pull"): frozenset(
+        {
+            "grid_like_material",
+            "membranous_structure",
+            "thread_like_material",
+            "tubular_structure",
+        }
+    ),
+    ("guide", "pass_through"): frozenset(
+        {"needle_like_instrument", "thread_like_material"}
+    ),
+    ("hold", "pull"): frozenset(
+        {"grid_like_material", "thread_like_material", "tubular_structure"}
+    ),
+    ("insert", "guide"): frozenset({"needle_like_instrument", "thread_like_material"}),
+    ("insert", "pass_through"): frozenset(
+        {"needle_like_instrument", "thread_like_material", "tubular_structure"}
+    ),
+    ("loop_around", "pull"): frozenset({"thread_like_material"}),
+    ("loop_around", "tighten"): frozenset({"thread_like_material"}),
+    ("pass_through", "loop_around"): frozenset({"thread_like_material"}),
+    ("pass_through", "pull"): frozenset(
+        {"grid_like_material", "thread_like_material", "tubular_structure"}
+    ),
+    ("position", "loop_around"): frozenset({"thread_like_material"}),
+    ("pull", "loop_around"): frozenset({"thread_like_material"}),
+    ("pull", "position"): frozenset({"thread_like_material"}),
+    ("pull", "tighten"): frozenset({"thread_like_material"}),
+}
+_ACTION_TRANSITIONS = frozenset(_ACTION_TRANSITION_SUPPORT)
 
 
 @dataclass(frozen=True)
@@ -191,6 +392,7 @@ class TemporalEvent:
     concepts: list[str]
     predicates: list[str]
     merge_scores: list[float]
+    merge_details: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -207,18 +409,14 @@ class EvidenceGraphArtifacts:
 def normalize_entity(
     surface: str, *, category_hint: str | None = None
 ) -> tuple[str, str, dict[str, Any]]:
-    """Return a conservative canonical concept while preserving the surface form."""
+    """Separate a finite base entity from directly visible attributes."""
     lowered = " ".join(str(surface).lower().split())
-    attributes = {
-        "colors": sorted(
-            {term for term in _COLOR_TERMS if re.search(rf"\b{term}\b", lowered)}
-        )
-    }
+    attributes = _extract_attributes(lowered)
     for pattern, canonical, category in _ENTITY_RULES:
         if re.search(pattern, lowered):
             return canonical, category, attributes
-    category = category_hint or "object"
-    return _slug(lowered) or "unidentified_object", category, attributes
+    canonical, category = _fallback_entity(lowered, category_hint)
+    return canonical, category, attributes
 
 
 def normalize_action(action: str) -> tuple[str, ...]:
@@ -226,7 +424,7 @@ def normalize_action(action: str) -> tuple[str, ...]:
     for pattern, predicates in _ACTION_RULES:
         if re.search(pattern, lowered):
             return predicates
-    return (_slug(lowered) or "unspecified_action",)
+    return ("other_action",)
 
 
 def load_description_rows(path: str | Path) -> list[dict[str, Any]]:
@@ -283,12 +481,13 @@ def merge_temporal_events(
         raise ValueError("max_merged_clips must be at least 1")
     if not clips:
         return []
-    groups: list[tuple[list[NormalizedClip], list[float]]] = []
+    groups: list[tuple[list[NormalizedClip], list[float], list[dict[str, Any]]]] = []
     current = [clips[0]]
     scores: list[float] = []
+    details: list[dict[str, Any]] = []
     for clip in clips[1:]:
         previous = current[-1]
-        score, has_continuity = _clip_continuity(previous, clip)
+        score, has_continuity, detail = _clip_continuity(previous, clip)
         gap = clip.start_seconds - previous.end_seconds
         can_merge = (
             gap <= max_gap_seconds
@@ -299,14 +498,16 @@ def merge_temporal_events(
         if can_merge:
             current.append(clip)
             scores.append(round(score, 4))
+            details.append(detail)
         else:
-            groups.append((current, scores))
+            groups.append((current, scores, details))
             current = [clip]
             scores = []
-    groups.append((current, scores))
+            details = []
+    groups.append((current, scores, details))
 
     events = []
-    for index, (group, merge_scores) in enumerate(groups):
+    for index, (group, merge_scores, merge_details) in enumerate(groups):
         events.append(
             TemporalEvent(
                 id=f"event:{group[0].video_id}:{index:05d}",
@@ -317,6 +518,7 @@ def merge_temporal_events(
                 concepts=sorted(set().union(*(clip.concepts for clip in group))),
                 predicates=sorted(set().union(*(clip.predicates for clip in group))),
                 merge_scores=merge_scores,
+                merge_details=merge_details,
             )
         )
     return events
@@ -342,6 +544,9 @@ def build_evidence_graph(
         dict
     )
     concept_mentions: dict[tuple[str, str], list[str]] = defaultdict(list)
+    concept_attributes: dict[tuple[str, str], dict[str, Counter[str]]] = defaultdict(
+        lambda: defaultdict(Counter)
+    )
     action_by_clip: dict[str, list[NormalizedAction]] = {}
     mention_by_id: dict[str, NormalizedMention] = {}
 
@@ -390,6 +595,8 @@ def build_evidence_graph(
             concept_id = _concept_node_id(*concept_key)
             concept_evidence[concept_key][clip.clip_id] = evidence
             concept_mentions[concept_key].append(mention.id)
+            for attribute_name, values in mention.attributes.items():
+                concept_attributes[concept_key][attribute_name].update(values)
             edges.extend(
                 [
                     GraphEdge(mention.id, clip_node_id, "observed_in", [evidence]),
@@ -443,6 +650,12 @@ def build_evidence_graph(
                     "category": category,
                     "mention_ids": concept_mentions[(category, canonical)],
                     "mention_count": len(concept_mentions[(category, canonical)]),
+                    "attribute_counts": {
+                        attribute_name: dict(sorted(counts.items()))
+                        for attribute_name, counts in sorted(
+                            concept_attributes[(category, canonical)].items()
+                        )
+                    },
                 },
             )
         )
@@ -478,6 +691,7 @@ def build_evidence_graph(
                     "concepts": event.concepts,
                     "predicates": event.predicates,
                     "merge_scores": event.merge_scores,
+                    "merge_details": event.merge_details,
                     "derived": True,
                 },
             )
@@ -514,9 +728,11 @@ def build_evidence_graph(
         video_id=video_id,
         nodes=nodes,
         edges=edges,
-        schema_version="medical-video-evidence-graph-v1",
+        schema_version=GRAPH_SCHEMA_VERSION,
         metadata={
             "builder_version": BUILDER_VERSION,
+            "action_vocabulary": sorted(ACTION_VOCABULARY),
+            "entity_vocabulary": sorted(ENTITY_VOCABULARY),
             "source_clip_count": len(clips),
             "merge_threshold": merge_threshold,
             "max_merged_clips": max_merged_clips,
@@ -628,17 +844,117 @@ def _normalize_description_row(
 
 def _clip_continuity(
     first: NormalizedClip, second: NormalizedClip
-) -> tuple[float, bool]:
-    action_score = _jaccard(first.predicates, second.predicates)
+) -> tuple[float, bool, dict[str, Any]]:
+    exact_predicates = sorted(first.predicates & second.predicates)
+    compatible_transitions = sorted(
+        (left, right)
+        for left in first.predicates
+        for right in second.predicates
+        if (left, right) in _ACTION_TRANSITIONS
+    )
     informative_first = first.concepts - _MERGE_STOP_CONCEPTS
     informative_second = second.concepts - _MERGE_STOP_CONCEPTS
+    shared_informative = sorted(informative_first & informative_second)
+    shared_informative_set = set(shared_informative)
+    supported_transitions = [
+        transition
+        for transition in compatible_transitions
+        if shared_informative_set & _ACTION_TRANSITION_SUPPORT[transition]
+    ]
+    exact_role_matches = _shared_action_roles(
+        first, second, {(predicate, predicate) for predicate in exact_predicates}
+    )
+    transition_role_matches = _shared_action_roles(
+        first, second, set(supported_transitions)
+    )
+    if exact_predicates and exact_role_matches:
+        action_score = 1.0
+        action_relation = "exact"
+        role_matches = exact_role_matches
+    elif supported_transitions:
+        action_score = 0.8
+        action_relation = "transition"
+        role_matches = transition_role_matches
+    else:
+        action_score = 0.0
+        action_relation = "none"
+        role_matches = []
     informative_score = _jaccard(informative_first, informative_second)
     all_concept_score = _jaccard(first.concepts, second.concepts)
-    score = 0.55 * action_score + 0.3 * informative_score + 0.15 * all_concept_score
-    has_continuity = bool(first.predicates & second.predicates) and (
-        bool(informative_first & informative_second) or all_concept_score >= 0.5
+    role_score = min(len(role_matches) / 2.0, 1.0)
+    score = (
+        0.5 * action_score
+        + 0.3 * informative_score
+        + 0.1 * all_concept_score
+        + 0.1 * role_score
     )
-    return score, has_continuity
+    has_continuity = bool(shared_informative) and action_relation != "none"
+    detail = {
+        "from_clip_id": first.clip_id,
+        "to_clip_id": second.clip_id,
+        "action_relation": action_relation,
+        "exact_predicates": exact_predicates,
+        "compatible_transitions": [list(item) for item in compatible_transitions],
+        "supported_transitions": [list(item) for item in supported_transitions],
+        "shared_informative_concepts": shared_informative,
+        "shared_action_roles": role_matches,
+        "score_components": {
+            "action": round(action_score, 4),
+            "informative_entity": round(informative_score, 4),
+            "all_entity": round(all_concept_score, 4),
+            "role": round(role_score, 4),
+        },
+    }
+    return score, has_continuity, detail
+
+
+def _shared_action_roles(
+    first: NormalizedClip,
+    second: NormalizedClip,
+    predicate_pairs: set[tuple[str, str]],
+) -> list[dict[str, str]]:
+    first_mentions = {mention.id: mention for mention in first.mentions}
+    second_mentions = {mention.id: mention for mention in second.mentions}
+    matches: set[tuple[str, str, str, str]] = set()
+    for first_action in first.actions:
+        for second_action in second.actions:
+            if (first_action.predicate, second_action.predicate) not in predicate_pairs:
+                continue
+            for role, first_id, second_id in (
+                (
+                    "subject",
+                    first_action.subject_mention_id,
+                    second_action.subject_mention_id,
+                ),
+                (
+                    "target",
+                    first_action.target_mention_id,
+                    second_action.target_mention_id,
+                ),
+            ):
+                first_canonical = first_mentions[first_id].canonical
+                second_canonical = second_mentions[second_id].canonical
+                if (
+                    first_canonical == second_canonical
+                    and first_canonical not in _MERGE_STOP_CONCEPTS
+                ):
+                    matches.add(
+                        (
+                            role,
+                            first_canonical,
+                            first_action.predicate,
+                            second_action.predicate,
+                        )
+                    )
+    return [
+        {
+            "role": role,
+            "canonical": canonical,
+            "from_predicate": from_predicate,
+            "to_predicate": to_predicate,
+        }
+        for role, canonical, from_predicate, to_predicate in sorted(matches)
+    ]
 
 
 def _continuation_edges(
@@ -709,6 +1025,16 @@ def _build_report(
     edge_types = Counter(edge.relation for edge in graph.edges)
     concepts = Counter(mention.canonical for clip in clips for mention in clip.mentions)
     actions = Counter(action.predicate for clip in clips for action in clip.actions)
+    attributes = Counter(
+        (attribute_name, value)
+        for clip in clips
+        for mention in clip.mentions
+        for attribute_name, values in mention.attributes.items()
+        for value in values
+    )
+    merge_relations = Counter(
+        detail["action_relation"] for event in events for detail in event.merge_details
+    )
     return {
         "builder_version": BUILDER_VERSION,
         "video_id": graph.video_id,
@@ -729,6 +1055,11 @@ def _build_report(
             len(clip.observation["medical_inferences"]) for clip in clips
         ),
         "medical_inferences_used": False,
+        "action_vocabulary": sorted(ACTION_VOCABULARY),
+        "entity_vocabulary": sorted(ENTITY_VOCABULARY),
+        "other_action_count": actions["other_action"],
+        "action_transition_merge_count": merge_relations["transition"],
+        "exact_action_merge_count": merge_relations["exact"],
         "clips_with_frame_paths": sum(bool(clip.frame_paths) for clip in clips),
         "missing_frame_path_count": sum(
             not Path(path).is_file() for clip in clips for path in clip.frame_paths
@@ -739,6 +1070,10 @@ def _build_report(
         ],
         "top_actions": [
             {"action": key, "events": value} for key, value in actions.most_common(20)
+        ],
+        "top_attributes": [
+            {"attribute": name, "value": value, "mentions": count}
+            for (name, value), count in attributes.most_common(20)
         ],
     }
 
@@ -769,8 +1104,33 @@ def _concept_node_id(category: str, canonical: str) -> str:
     return f"concept:{category}:{canonical}"
 
 
-def _slug(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+def _extract_attributes(surface: str) -> dict[str, list[str]]:
+    attributes: dict[str, list[str]] = {}
+    for attribute_name, rules in _ATTRIBUTE_RULES.items():
+        values = sorted(
+            {normalized for pattern, normalized in rules if re.search(pattern, surface)}
+        )
+        if values:
+            attributes[attribute_name] = values
+    return attributes
+
+
+def _fallback_entity(surface: str, category_hint: str | None) -> tuple[str, str]:
+    if re.search(r"\b(?:material|substance|strands?)\b", surface):
+        return "generic_material", "material"
+    if re.search(r"\b(?:surface|lining|wall|edge)\b", surface):
+        return "surface_region", category_hint or "anatomy"
+    if re.search(r"\b(?:structure|mass)\b", surface):
+        return "generic_structure", category_hint or "object"
+    if re.search(r"\b(?:object|device)\b", surface):
+        return "generic_object", category_hint or "object"
+    if category_hint == "instrument":
+        return "generic_instrument", "instrument"
+    if category_hint == "anatomy":
+        return "tissue_region", "anatomy"
+    if category_hint == "material":
+        return "generic_material", "material"
+    return "generic_object", category_hint or "object"
 
 
 def _jaccard(left: set[str], right: set[str]) -> float:
