@@ -6,12 +6,15 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from itertools import pairwise
 from pathlib import Path
+from statistics import mean, median
 from typing import Any
 
 from .schemas import EvidenceInterval, GraphEdge, GraphNode, VideoEvidenceGraph
 
-BUILDER_VERSION = "observation-evidence-graph-v2"
-GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v2"
+BUILDER_VERSION = "observation-evidence-graph-v2.1"
+GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v2.1"
+EVENT_SUPPORT_VERSION = "event-structural-support-v1"
+REPRESENTATIVE_EVIDENCE_VERSION = "event-representative-evidence-v1"
 
 ACTION_VOCABULARY = frozenset(
     {
@@ -393,6 +396,12 @@ class TemporalEvent:
     predicates: list[str]
     merge_scores: list[float]
     merge_details: list[dict[str, Any]] = field(default_factory=list)
+    structural_support_score: float = 0.0
+    support_mode: str = "unknown"
+    support_components: dict[str, float | None] = field(default_factory=dict)
+    representative_evidence: list[dict[str, Any]] = field(default_factory=list)
+    representative_action_coverage: float = 0.0
+    representative_entity_coverage: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -474,11 +483,14 @@ def merge_temporal_events(
     threshold: float = 0.45,
     max_merged_clips: int = 5,
     max_gap_seconds: float = 1.0,
+    max_representative_clips: int = 3,
 ) -> list[TemporalEvent]:
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("threshold must be between 0 and 1")
     if max_merged_clips < 1:
         raise ValueError("max_merged_clips must be at least 1")
+    if max_representative_clips < 1:
+        raise ValueError("max_representative_clips must be at least 1")
     if not clips:
         return []
     groups: list[tuple[list[NormalizedClip], list[float], list[dict[str, Any]]]] = []
@@ -508,6 +520,16 @@ def merge_temporal_events(
 
     events = []
     for index, (group, merge_scores, merge_details) in enumerate(groups):
+        support_score, support_mode, support_components = _event_support(
+            group, merge_scores, merge_details
+        )
+        representatives, action_coverage, entity_coverage = (
+            _select_representative_evidence(
+                group,
+                merge_details,
+                max_representatives=max_representative_clips,
+            )
+        )
         events.append(
             TemporalEvent(
                 id=f"event:{group[0].video_id}:{index:05d}",
@@ -519,6 +541,12 @@ def merge_temporal_events(
                 predicates=sorted(set().union(*(clip.predicates for clip in group))),
                 merge_scores=merge_scores,
                 merge_details=merge_details,
+                structural_support_score=support_score,
+                support_mode=support_mode,
+                support_components=support_components,
+                representative_evidence=representatives,
+                representative_action_coverage=action_coverage,
+                representative_entity_coverage=entity_coverage,
             )
         )
     return events
@@ -530,6 +558,7 @@ def build_evidence_graph(
     frame_paths_by_clip: dict[str, list[str]] | None = None,
     merge_threshold: float = 0.45,
     max_merged_clips: int = 5,
+    max_representative_clips: int = 3,
 ) -> EvidenceGraphArtifacts:
     clips = normalize_description_rows(rows, frame_paths_by_clip=frame_paths_by_clip)
     video_id = clips[0].video_id
@@ -537,6 +566,7 @@ def build_evidence_graph(
         clips,
         threshold=merge_threshold,
         max_merged_clips=max_merged_clips,
+        max_representative_clips=max_representative_clips,
     )
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -685,13 +715,27 @@ def build_evidence_graph(
                 node_type="temporal_event",
                 label=_event_label(event),
                 evidence=event_intervals,
-                confidence=min(event.merge_scores, default=1.0),
+                confidence=event.structural_support_score,
                 metadata={
                     "supporting_clip_ids": event.supporting_clip_ids,
                     "concepts": event.concepts,
                     "predicates": event.predicates,
                     "merge_scores": event.merge_scores,
                     "merge_details": event.merge_details,
+                    "structural_support_score": event.structural_support_score,
+                    "support_mode": event.support_mode,
+                    "support_components": event.support_components,
+                    "support_score_version": EVENT_SUPPORT_VERSION,
+                    "representative_evidence": event.representative_evidence,
+                    "representative_action_coverage": (
+                        event.representative_action_coverage
+                    ),
+                    "representative_entity_coverage": (
+                        event.representative_entity_coverage
+                    ),
+                    "representative_evidence_version": (
+                        REPRESENTATIVE_EVIDENCE_VERSION
+                    ),
                     "derived": True,
                 },
             )
@@ -736,6 +780,9 @@ def build_evidence_graph(
             "source_clip_count": len(clips),
             "merge_threshold": merge_threshold,
             "max_merged_clips": max_merged_clips,
+            "max_representative_clips": max_representative_clips,
+            "event_support_version": EVENT_SUPPORT_VERSION,
+            "representative_evidence_version": REPRESENTATIVE_EVIDENCE_VERSION,
             "medical_inferences_used": False,
         },
     )
@@ -840,6 +887,202 @@ def _normalize_description_row(
         prompt_version=str(row.get("prompt_version", "unknown")),
         frame_paths=frame_paths,
     )
+
+
+def _event_support(
+    clips: list[NormalizedClip],
+    merge_scores: list[float],
+    merge_details: list[dict[str, Any]],
+) -> tuple[float, str, dict[str, float | None]]:
+    observation_scores = []
+    argument_scores = []
+    for clip in clips:
+        observation_score, argument_score = _clip_specificity(clip)
+        observation_scores.append(observation_score)
+        argument_scores.append(argument_score)
+    observation_specificity = mean(observation_scores)
+    argument_specificity = mean(argument_scores)
+
+    if len(clips) == 1:
+        score = 0.6 * observation_specificity + 0.4 * argument_specificity
+        components: dict[str, float | None] = {
+            "mean_transition_score": None,
+            "minimum_transition_score": None,
+            "entity_continuity": None,
+            "role_consistency": None,
+            "observation_specificity": round(observation_specificity, 4),
+            "action_argument_specificity": round(argument_specificity, 4),
+        }
+        return round(score, 4), "singleton_evidence", components
+
+    entity_continuity = mean(
+        detail["score_components"]["informative_entity"] for detail in merge_details
+    )
+    role_consistency = mean(
+        detail["score_components"]["role"] for detail in merge_details
+    )
+    mean_transition_score = mean(merge_scores)
+    minimum_transition_score = min(merge_scores)
+    score = (
+        0.3 * mean_transition_score
+        + 0.15 * minimum_transition_score
+        + 0.2 * entity_continuity
+        + 0.15 * role_consistency
+        + 0.1 * observation_specificity
+        + 0.1 * argument_specificity
+    )
+    components = {
+        "mean_transition_score": round(mean_transition_score, 4),
+        "minimum_transition_score": round(minimum_transition_score, 4),
+        "entity_continuity": round(entity_continuity, 4),
+        "role_consistency": round(role_consistency, 4),
+        "observation_specificity": round(observation_specificity, 4),
+        "action_argument_specificity": round(argument_specificity, 4),
+    }
+    return round(score, 4), "merged_event", components
+
+
+def _clip_specificity(clip: NormalizedClip) -> tuple[float, float]:
+    informative_mentions = sum(
+        mention.canonical not in _MERGE_STOP_CONCEPTS for mention in clip.mentions
+    )
+    mention_ratio = informative_mentions / len(clip.mentions) if clip.mentions else 0.0
+    recognized_actions = sum(
+        action.predicate != "other_action" for action in clip.actions
+    )
+    action_ratio = recognized_actions / len(clip.actions) if clip.actions else 0.0
+    observation_specificity = 0.7 * mention_ratio + 0.3 * action_ratio
+
+    mention_by_id = {mention.id: mention for mention in clip.mentions}
+    argument_count = 2 * len(clip.actions)
+    informative_arguments = sum(
+        mention_by_id[mention_id].canonical not in _MERGE_STOP_CONCEPTS
+        for action in clip.actions
+        for mention_id in (action.subject_mention_id, action.target_mention_id)
+    )
+    argument_specificity = (
+        informative_arguments / argument_count if argument_count else 0.0
+    )
+    return observation_specificity, argument_specificity
+
+
+def _select_representative_evidence(
+    clips: list[NormalizedClip],
+    merge_details: list[dict[str, Any]],
+    *,
+    max_representatives: int,
+) -> tuple[list[dict[str, Any]], float, float]:
+    target_count = min(max_representatives, len(clips))
+    event_actions = set().union(*(clip.predicates for clip in clips))
+    event_concepts = (
+        set().union(*(clip.concepts for clip in clips)) - _MERGE_STOP_CONCEPTS
+    )
+    action_frequency = Counter(
+        predicate for clip in clips for predicate in clip.predicates
+    )
+    concept_frequency = Counter(
+        concept for clip in clips for concept in clip.concepts - _MERGE_STOP_CONCEPTS
+    )
+    transition_clip_ids = {
+        clip_id
+        for detail in merge_details
+        if detail["action_relation"] == "transition"
+        for clip_id in (detail["from_clip_id"], detail["to_clip_id"])
+    }
+    terminal_actions = {"attach", "cut", "remove", "tighten"}
+    terminal_clips = [clip for clip in clips if clip.predicates & terminal_actions]
+    selected: list[tuple[NormalizedClip, float, str]] = []
+    covered_actions: set[str] = set()
+    covered_concepts: set[str] = set()
+
+    def utility(clip: NormalizedClip) -> float:
+        new_actions = clip.predicates - covered_actions
+        new_concepts = (clip.concepts - _MERGE_STOP_CONCEPTS) - covered_concepts
+        action_gain = sum(1.0 / action_frequency[item] for item in new_actions)
+        concept_gain = sum(1.0 / concept_frequency[item] for item in new_concepts)
+        action_denominator = sum(1.0 / action_frequency[item] for item in event_actions)
+        concept_denominator = sum(
+            1.0 / concept_frequency[item] for item in event_concepts
+        )
+        action_gain = action_gain / action_denominator if action_denominator else 0.0
+        concept_gain = (
+            concept_gain / concept_denominator if concept_denominator else 0.0
+        )
+        observation_score, argument_score = _clip_specificity(clip)
+        specificity = 0.6 * observation_score + 0.4 * argument_score
+        return 0.55 * action_gain + 0.25 * concept_gain + 0.2 * specificity
+
+    def choose(candidates: list[NormalizedClip], reason: str) -> None:
+        available = [
+            clip
+            for clip in candidates
+            if all(
+                clip.clip_id != selected_clip.clip_id
+                for selected_clip, _, _ in selected
+            )
+        ]
+        if not available or len(selected) >= target_count:
+            return
+        clip = max(available, key=lambda item: (utility(item), -item.clip_index))
+        score = utility(clip)
+        selected.append((clip, score, reason))
+        covered_actions.update(clip.predicates)
+        covered_concepts.update(clip.concepts - _MERGE_STOP_CONCEPTS)
+
+    choose(clips, "primary_event_coverage")
+    choose(terminal_clips, "terminal_action_coverage")
+    choose(
+        [clip for clip in clips if clip.clip_id in transition_clip_ids],
+        "action_transition_coverage",
+    )
+    while len(selected) < target_count:
+        choose(clips, "marginal_event_coverage")
+
+    representatives = []
+    for selection_index, (clip, score, reason) in enumerate(selected):
+        if selection_index == 0:
+            role = "primary"
+        elif clip.predicates & terminal_actions:
+            role = "terminal"
+        elif clip.clip_id in transition_clip_ids:
+            role = "transition"
+        else:
+            role = "supporting"
+        reasons = [reason]
+        if clip.predicates & terminal_actions and reason != "terminal_action_coverage":
+            reasons.append("covers_terminal_action")
+        if (
+            clip.clip_id in transition_clip_ids
+            and reason != "action_transition_coverage"
+        ):
+            reasons.append("covers_action_transition")
+        representatives.append(
+            {
+                "clip_id": clip.clip_id,
+                "clip_index": clip.clip_index,
+                "start_seconds": clip.start_seconds,
+                "end_seconds": clip.end_seconds,
+                "role": role,
+                "selection_score": round(score, 4),
+                "covered_actions": sorted(clip.predicates),
+                "covered_informative_concepts": sorted(
+                    clip.concepts - _MERGE_STOP_CONCEPTS
+                ),
+                "reasons": reasons,
+            }
+        )
+
+    action_coverage = (
+        len(covered_actions & event_actions) / len(event_actions)
+        if event_actions
+        else 1.0
+    )
+    entity_coverage = (
+        len(covered_concepts & event_concepts) / len(event_concepts)
+        if event_concepts
+        else 1.0
+    )
+    return representatives, round(action_coverage, 4), round(entity_coverage, 4)
 
 
 def _clip_continuity(
@@ -1035,6 +1278,23 @@ def _build_report(
     merge_relations = Counter(
         detail["action_relation"] for event in events for detail in event.merge_details
     )
+    merged_support_scores = [
+        event.structural_support_score
+        for event in events
+        if event.support_mode == "merged_event"
+    ]
+    singleton_support_scores = [
+        event.structural_support_score
+        for event in events
+        if event.support_mode == "singleton_evidence"
+    ]
+    representative_counts = [len(event.representative_evidence) for event in events]
+    representative_action_coverages = [
+        event.representative_action_coverage for event in events
+    ]
+    representative_entity_coverages = [
+        event.representative_entity_coverage for event in events
+    ]
     return {
         "builder_version": BUILDER_VERSION,
         "video_id": graph.video_id,
@@ -1060,6 +1320,20 @@ def _build_report(
         "other_action_count": actions["other_action"],
         "action_transition_merge_count": merge_relations["transition"],
         "exact_action_merge_count": merge_relations["exact"],
+        "event_support_version": EVENT_SUPPORT_VERSION,
+        "event_support_score_summary": _score_summary(
+            [event.structural_support_score for event in events]
+        ),
+        "merged_event_support_score_summary": _score_summary(merged_support_scores),
+        "singleton_support_score_summary": _score_summary(singleton_support_scores),
+        "representative_evidence_version": REPRESENTATIVE_EVIDENCE_VERSION,
+        "representative_clip_count_summary": _score_summary(representative_counts),
+        "representative_action_coverage_summary": _score_summary(
+            representative_action_coverages
+        ),
+        "representative_entity_coverage_summary": _score_summary(
+            representative_entity_coverages
+        ),
         "clips_with_frame_paths": sum(bool(clip.frame_paths) for clip in clips),
         "missing_frame_path_count": sum(
             not Path(path).is_file() for clip in clips for path in clip.frame_paths
@@ -1113,6 +1387,24 @@ def _extract_attributes(surface: str) -> dict[str, list[str]]:
         if values:
             attributes[attribute_name] = values
     return attributes
+
+
+def _score_summary(values: list[float | int]) -> dict[str, float | int | None]:
+    if not values:
+        return {
+            "count": 0,
+            "minimum": None,
+            "mean": None,
+            "median": None,
+            "maximum": None,
+        }
+    return {
+        "count": len(values),
+        "minimum": round(float(min(values)), 4),
+        "mean": round(float(mean(values)), 4),
+        "median": round(float(median(values)), 4),
+        "maximum": round(float(max(values)), 4),
+    }
 
 
 def _fallback_entity(surface: str, category_hint: str | None) -> tuple[str, str]:

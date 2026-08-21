@@ -4,7 +4,9 @@ from pathlib import Path
 from medhorizon_videorag.graph_rag import (
     ACTION_VOCABULARY,
     ENTITY_VOCABULARY,
+    EVENT_SUPPORT_VERSION,
     GRAPH_SCHEMA_VERSION,
+    REPRESENTATIVE_EVIDENCE_VERSION,
     build_evidence_graph,
     merge_temporal_events,
     normalize_action,
@@ -166,6 +168,17 @@ def test_temporal_merge_supports_compatible_action_sequence() -> None:
     assert events[0].merge_details[0]["compatible_transitions"] == [
         ["pass_through", "pull"]
     ]
+    assert events[0].support_mode == "merged_event"
+    assert 0.0 < events[0].structural_support_score < 1.0
+    assert events[0].support_components["minimum_transition_score"] is not None
+    representative_ids = {item["clip_id"] for item in events[0].representative_evidence}
+    assert len(representative_ids) == 3
+    assert "case_vgent_00002" in representative_ids
+    assert events[0].representative_action_coverage == 1.0
+    assert all(
+        item["clip_id"] in events[0].supporting_clip_ids
+        for item in events[0].representative_evidence
+    )
 
 
 def test_temporal_merge_rejects_transition_supported_only_by_generic_entities() -> None:
@@ -208,6 +221,42 @@ def test_temporal_merge_binds_exact_action_to_matching_roles() -> None:
     events = merge_temporal_events(normalize_description_rows(rows))
 
     assert len(events) == 2
+    assert all(event.support_mode == "singleton_evidence" for event in events)
+    assert all(
+        event.support_components["mean_transition_score"] is None for event in events
+    )
+    assert all(len(event.representative_evidence) == 1 for event in events)
+
+
+def test_representative_evidence_respects_requested_budget() -> None:
+    rows = [
+        _row(
+            index,
+            action=action,
+            subject=subject,
+            target=target,
+        )
+        for index, action, subject, target in (
+            (0, "passes through", "needle-like instrument", "reddish tissue"),
+            (1, "pulls", "metal forceps", "thread-like material"),
+            (2, "tightens", "thread-like material", "tubular structure"),
+        )
+    ]
+
+    event = merge_temporal_events(
+        normalize_description_rows(rows), max_representative_clips=2
+    )[0]
+
+    assert len(event.representative_evidence) == 2
+    terminal = next(
+        item
+        for item in event.representative_evidence
+        if item["clip_id"] == "case_vgent_00002"
+    )
+    assert set(terminal["reasons"]) & {
+        "terminal_action_coverage",
+        "covers_terminal_action",
+    }
 
 
 def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
@@ -236,9 +285,20 @@ def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
         for node in graph.nodes
         if node.id == "concept:material:thread_like_material"
     )
+    event_node = next(
+        node for node in graph.nodes if node.node_type == "temporal_event"
+    )
 
     assert clip_node.metadata["observation"]["medical_inferences"]
     assert graph.metadata["medical_inferences_used"] is False
+    assert graph.metadata["event_support_version"] == EVENT_SUPPORT_VERSION
+    assert (
+        graph.metadata["representative_evidence_version"]
+        == REPRESENTATIVE_EVIDENCE_VERSION
+    )
+    assert event_node.confidence == event_node.metadata["structural_support_score"]
+    assert event_node.confidence < 1.0
+    assert event_node.metadata["representative_evidence"]
     assert thread_concept.metadata["attribute_counts"]["color"]["blue"] == 2
     assert clip_node.evidence[0].frame_paths == frame_paths["case_vgent_00000"]
     assert any(edge.relation == "observed_in" for edge in graph.edges)
@@ -254,3 +314,5 @@ def test_builder_preserves_raw_evidence_and_excludes_medical_inferences(
     assert payload["schema_version"] == GRAPH_SCHEMA_VERSION
     assert "medical_inferences_excluded_from_graph" in normalized
     assert artifacts.report["other_action_count"] == 0
+    assert artifacts.report["event_support_score_summary"]["count"] == 2
+    assert artifacts.report["representative_clip_count_summary"]["maximum"] == 1.0

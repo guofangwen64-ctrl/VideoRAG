@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--merge-threshold", type=float, default=0.45)
     parser.add_argument("--max-merged-clips", type=int, default=5)
+    parser.add_argument("--max-representative-clips", type=int, default=3)
     args = parser.parse_args()
 
     rows = load_description_rows(args.descriptions)
@@ -36,6 +37,7 @@ def main() -> None:
         frame_paths_by_clip=frame_paths,
         merge_threshold=args.merge_threshold,
         max_merged_clips=args.max_merged_clips,
+        max_representative_clips=args.max_representative_clips,
     )
     write_evidence_graph_artifacts(artifacts, args.output_dir)
     report = artifacts.report

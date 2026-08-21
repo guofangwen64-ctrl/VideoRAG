@@ -57,9 +57,9 @@ Graph-RAG 不替换或改写现有 baseline。只有在小规模实验中验证�
 
 随后在小规模真实视频上核对 FFprobe 时长、实际抽帧时间戳和首/中/尾 clip 视觉内容，确认采样协议后再进入建图实验。
 
-### 阶段 1.5：Observation 证据图（v2 已实现）
+### 阶段 1.5：Observation 证据图（v2.1 已实现）
 
-builder 只消费 observation-first `observed_facts`，构建 clip、entity mention、canonical concept、action event 和 temporal event。v2 将动作限制在有限词表内，将颜色、外观、形状、尺寸和材质从基础实体 concept 中拆分到 mention attributes，并支持 `pass_through -> pull -> tighten` 等可审计动作转移。原始 observation 与帧指针保存在 clip 节点；医学推断不进入图事实。跨 clip 实体仅允许 `possible_continuation` 弱关系，避免在缺少视觉跟踪证据时错误合并物理实体。
+builder 只消费 observation-first `observed_facts`，构建 clip、entity mention、canonical concept、action event 和 temporal event。v2 将动作限制在有限词表内，将颜色、外观、形状、尺寸和材质从基础实体 concept 中拆分到 mention attributes，并支持 `pass_through -> pull -> tighten` 等可审计动作转移。v2.1 为每个 event 新增带分量的 structural support score，并确定性选择最多 3 个代表 clip，用于后续检索排序与 Reader 证据预算。原始 observation 与帧指针保存在 clip 节点；医学推断不进入图事实。跨 clip 实体仅允许 `possible_continuation` 弱关系，避免在缺少视觉跟踪证据时错误合并物理实体。
 
 ### 阶段 2：数据协议
 
