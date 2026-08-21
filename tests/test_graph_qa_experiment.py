@@ -85,9 +85,7 @@ def test_catalog_uses_observed_facts_but_not_medical_inferences(
     assert catalog[0]["observations"][0]["visible_instruments"] == [
         "needle-like instrument"
     ]
-    assert catalog[0]["observations"][0]["actions"] == [
-        "needle-like instrument contacts reddish tissue"
-    ]
+    assert catalog[0]["concepts"] == ["needle_like_instrument"]
     assert "phase label" not in str(catalog).lower()
 
 

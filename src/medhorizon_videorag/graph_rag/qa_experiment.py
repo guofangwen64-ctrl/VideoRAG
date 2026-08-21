@@ -13,6 +13,20 @@ from .schemas import VideoEvidenceGraph
 
 GRAPH_QA_EXPERIMENT_VERSION = "qwen25-event-rerank-reader-v1"
 
+_CATALOG_STOP_CONCEPTS = frozenset(
+    {
+        "clear_fluid",
+        "generic_instrument",
+        "generic_material",
+        "generic_object",
+        "generic_structure",
+        "red_fluid",
+        "surface_region",
+        "tissue",
+        "tissue_region",
+    }
+)
+
 _TIME_RANGE_PATTERNS = (
     re.compile(
         r"\s+from\s+\d{1,2}:\d{2}(?::\d{2})?\s+to\s+"
@@ -66,29 +80,23 @@ def build_event_observation_catalog(graph: VideoEvidenceGraph) -> list[dict[str,
             if clip is None:
                 continue
             facts = clip.metadata.get("observation", {}).get("observed_facts", {})
-            actions = [
-                " ".join(
-                    str(action.get(field, "")).strip()
-                    for field in ("subject", "action", "target")
-                    if str(action.get(field, "")).strip()
-                )
-                for action in facts.get("actions", [])[:4]
-                if isinstance(action, dict)
-            ]
             observations.append(
                 {
                     "summary": clip.label,
                     "visible_instruments": list(
-                        facts.get("visible_instruments", [])[:4]
+                        facts.get("visible_instruments", [])[:3]
                     ),
-                    "actions": actions,
                 }
             )
         catalog.append(
             {
                 "event_id": event.id,
                 "predicates": list(event.metadata.get("predicates", [])),
-                "concepts": list(event.metadata.get("concepts", [])),
+                "concepts": [
+                    item
+                    for item in event.metadata.get("concepts", [])
+                    if item not in _CATALOG_STOP_CONCEPTS
+                ],
                 "observations": observations,
             }
         )
@@ -201,28 +209,40 @@ class OpenAICompatibleGraphQA:
             "labels. Infer which temporal events are most relevant to the question from "
             "their visible instruments, generic entities, actions, and summaries. "
             "Do not answer the multiple-choice question yet. Select the best event IDs "
-            f"in ranked order, with at most {top_events} IDs. Return only JSON with keys "
-            "event_ids and rationale.\nQuestion: "
+            f"in ranked order, with at most {top_events} IDs. Copy one or more complete "
+            "event IDs exactly from the catalog without changing any digits. Return "
+            'one JSON object with keys "event_ids" and "rationale"; keep rationale '
+            "under 10 words. Do not include Markdown or code fences.\nQuestion: "
             + question
             + "\nChoices:\n"
             + "\n".join(choices)
             + "\nObservation event catalog:\n"
             + json.dumps(list(catalog), ensure_ascii=False, separators=(",", ":"))
         )
-        payload = self._text_json(prompt, max_tokens=512)
-        raw_ids = payload.get("event_ids")
+        text = self._text_response(prompt, max_tokens=128)
+        try:
+            payload = _parse_json_object(text)
+            raw_ids = payload.get("event_ids")
+        except RuntimeError:
+            raw_ids = re.findall(r"event:[A-Za-z0-9_-]+:\d{5}", text)
         if not isinstance(raw_ids, list):
-            raise TypeError(f"Event reranker returned invalid event_ids: {payload}")
+            raise TypeError(f"Event reranker returned invalid event_ids: {text}")
         event_ids = []
         for item in raw_ids:
             event_id = str(item)
+            if event_id not in known_ids:
+                match = re.fullmatch(r"(event:[A-Za-z0-9_-]+:)(\d+)", event_id)
+                if match:
+                    normalized_id = f"{match.group(1)}{int(match.group(2)):05d}"
+                    if normalized_id in known_ids:
+                        event_id = normalized_id
             if event_id in known_ids and event_id not in event_ids:
                 event_ids.append(event_id)
             if len(event_ids) >= top_events:
                 break
         if not event_ids:
-            raise RuntimeError(f"Event reranker returned no valid event IDs: {payload}")
-        return event_ids, str(payload.get("rationale", ""))
+            raise RuntimeError(f"Event reranker returned no valid event IDs: {text}")
+        return event_ids, ""
 
     def answer(
         self,
@@ -265,14 +285,15 @@ class OpenAICompatibleGraphQA:
             )
         return choice, str(payload.get("rationale", ""))
 
-    def _text_json(self, prompt: str, *, max_tokens: int) -> dict[str, Any]:
+    def _text_response(self, prompt: str, *, max_tokens: int) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=max_tokens,
+            response_format={"type": "json_object"},
         )
-        return _parse_json_object(response.choices[0].message.content or "")
+        return response.choices[0].message.content or ""
 
     def _vision_json(
         self, content: list[dict[str, Any]], *, max_tokens: int
@@ -282,6 +303,7 @@ class OpenAICompatibleGraphQA:
             messages=[{"role": "user", "content": content}],
             temperature=0,
             max_tokens=max_tokens,
+            response_format={"type": "json_object"},
         )
         return _parse_json_object(response.choices[0].message.content or "")
 
