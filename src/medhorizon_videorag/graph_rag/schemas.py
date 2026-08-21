@@ -4,7 +4,18 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 NODE_TYPES = frozenset(
-    {"segment", "phase", "action", "instrument", "anatomy", "finding"}
+    {
+        "segment",
+        "phase",
+        "action",
+        "instrument",
+        "anatomy",
+        "finding",
+        "entity_mention",
+        "concept",
+        "action_event",
+        "temporal_event",
+    }
 )
 EDGE_TYPES = frozenset(
     {
@@ -15,6 +26,11 @@ EDGE_TYPES = frozenset(
         "causes",
         "same_entity",
         "co_occurs",
+        "observed_in",
+        "instance_of",
+        "has_subject",
+        "part_of",
+        "possible_continuation",
     }
 )
 REASONING_TYPES = frozenset(

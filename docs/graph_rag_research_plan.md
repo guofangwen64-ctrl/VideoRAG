@@ -51,11 +51,15 @@ Graph-RAG 不替换或改写现有 baseline。只有在小规模实验中验证�
 
 保留当前 CLIP/Temporal/Hybrid 报告、question-only、时间窗口 Reader 和逐题配对协议，不改变已有输出语义。
 
-### 阶段 1：VGent 切片基线验证（当前阶段）
+### 阶段 1：VGent 切片基线验证（已完成单视频前期验证）
 
 默认采用 `medical_streaming`：顺序解码并始终保持 1 FPS，每 64 个采样帧组成约 64 秒 clip，不设置全视频 7,200 帧上限。`official_cap` 仅作为严格复现对照。先基于 annotation duration 统计 clip 数量和 partial clip，再用真实视频核对有效 FPS、时长与解码完整性，不做实体抽取或建图。
 
 随后在小规模真实视频上核对 FFprobe 时长、实际抽帧时间戳和首/中/尾 clip 视觉内容，确认采样协议后再进入建图实验。
+
+### 阶段 1.5：Observation 证据图（当前阶段）
+
+第一版 builder 只消费 observation-first `observed_facts`，构建 clip、entity mention、canonical concept、action event 和 temporal event。原始 observation 与帧指针保存在 clip 节点；医学推断不进入图事实。跨 clip 实体仅允许 `possible_continuation` 弱关系，避免在缺少视觉跟踪证据时错误合并物理实体。
 
 ### 阶段 2：数据协议
 
