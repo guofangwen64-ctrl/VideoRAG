@@ -8,6 +8,7 @@ import re
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,22 @@ SUMMARY_FORBIDDEN_TERMS = (
     "repair",
     "ligation",
 )
+
+
+@dataclass(frozen=True)
+class ClipFrameBatch:
+    """One contiguous visual request within a parent clip."""
+
+    index: int
+    start_seconds: float
+    end_seconds: float
+    source_frame_count: int
+    frame_paths: list[str]
+
+    @property
+    def padding_frame_count(self) -> int:
+        return len(self.frame_paths) - self.source_frame_count
+
 
 OBSERVATION_FIRST_SYSTEM_PROMPT = """You are a literal visual transcription system.
 The summary and observed_facts must contain only directly visible appearance,
@@ -265,6 +282,116 @@ def prepare_request_frame_paths(
     )
 
 
+def split_clip_frame_batches(
+    clip: VgentClipPlan,
+    *,
+    frames_per_clip: int = 64,
+    frames_per_request: int = 32,
+) -> list[ClipFrameBatch]:
+    """Split one parent clip into contiguous, fixed-size visual requests."""
+    if frames_per_clip <= 0 or frames_per_request <= 0:
+        raise ValueError("frame counts must be positive")
+    if frames_per_clip % frames_per_request:
+        raise ValueError("frames_per_clip must be divisible by frames_per_request")
+    source_paths = list(clip.frame_paths)
+    if len(source_paths) != clip.sampled_frame_count:
+        raise ValueError(
+            f"Clip {clip.id} has {len(source_paths)} cached frames; "
+            f"expected {clip.sampled_frame_count}"
+        )
+    if not source_paths or len(source_paths) > frames_per_clip:
+        raise ValueError(
+            f"Clip {clip.id} must contain between 1 and {frames_per_clip} frames"
+        )
+    if any(not Path(path).is_file() for path in source_paths):
+        raise ValueError(f"Clip {clip.id} has missing cached frames")
+
+    batch_count = frames_per_clip // frames_per_request
+    duration = clip.end_seconds - clip.start_seconds
+    batches = []
+    for index in range(batch_count):
+        source_start = round(index * len(source_paths) / batch_count)
+        source_end = round((index + 1) * len(source_paths) / batch_count)
+        batch_paths = source_paths[source_start:source_end]
+        if not batch_paths:
+            nearest = min(source_start, len(source_paths) - 1)
+            batch_paths = [source_paths[nearest]]
+        source_frame_count = len(batch_paths)
+        if source_frame_count > frames_per_request:
+            raise ValueError(
+                f"Clip {clip.id} batch {index} exceeds {frames_per_request} frames"
+            )
+        batch_paths += [batch_paths[-1]] * (frames_per_request - len(batch_paths))
+        batches.append(
+            ClipFrameBatch(
+                index=index,
+                start_seconds=clip.start_seconds + duration * index / batch_count,
+                end_seconds=clip.start_seconds + duration * (index + 1) / batch_count,
+                source_frame_count=source_frame_count,
+                frame_paths=batch_paths,
+            )
+        )
+    return batches
+
+
+def _stable_unique(items: Sequence[Any]) -> list[Any]:
+    unique = []
+    seen = set()
+    for item in items:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
+def merge_segment_descriptions(
+    descriptions: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Create a backward-compatible parent observation without another model call."""
+    if not descriptions:
+        raise ValueError("At least one segment description is required")
+    for description in descriptions:
+        _validate_description_payload(description)
+    observed_fields = (
+        "visible_anatomy",
+        "visible_instruments",
+        "visible_objects",
+        "actions",
+        "state_changes",
+        "visual_evidence",
+    )
+    return {
+        "summary": " ".join(
+            str(description["summary"]).strip() for description in descriptions
+        ),
+        "observed_facts": {
+            field: _stable_unique(
+                [
+                    item
+                    for description in descriptions
+                    for item in description["observed_facts"][field]
+                ]
+            )
+            for field in observed_fields
+        },
+        "medical_inferences": _stable_unique(
+            [
+                item
+                for description in descriptions
+                for item in description["medical_inferences"]
+            ]
+        ),
+        "uncertainties": _stable_unique(
+            [
+                item
+                for description in descriptions
+                for item in description["uncertainties"]
+            ]
+        ),
+    }
+
+
 class OpenAICompatibleClipDescriber:
     """Generate structured medical clip descriptions through a local vLLM endpoint."""
 
@@ -319,13 +446,21 @@ class OpenAICompatibleClipDescriber:
     def describe(
         self, clip: VgentClipPlan, *, frames_per_request: int = 64
     ) -> dict[str, Any]:
-        self.last_attempt_count = 0
         request_paths = prepare_request_frame_paths(
             clip,
             frames_per_request=frames_per_request,
         )
+        return self.describe_frame_paths(request_paths)
+
+    def describe_frame_paths(self, frame_paths: Sequence[str]) -> dict[str, Any]:
+        """Describe an already selected fixed-size visual request."""
+        if not frame_paths:
+            raise ValueError("At least one frame is required")
+        if any(not Path(path).is_file() for path in frame_paths):
+            raise ValueError("Visual request has missing cached frames")
+        self.last_attempt_count = 0
         content: list[dict[str, Any]] = [{"type": "text", "text": DESCRIPTION_PROMPT}]
-        for frame_path in request_paths:
+        for frame_path in frame_paths:
             encoded = _encode_resized_jpeg(frame_path, self.max_image_pixels)
             content.append(
                 {

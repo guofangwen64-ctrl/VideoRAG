@@ -3,16 +3,22 @@ from types import SimpleNamespace
 
 import pytest
 
-from experiments.describe_vgent_clips import _remove_resolved_errors
+from experiments.describe_vgent_clips import (
+    _load_segment_cache,
+    _remove_resolved_errors,
+    _remove_resolved_segment_cache,
+)
 from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT,
     DESCRIPTION_PROMPT_VERSION,
     OBSERVATION_FIRST_SYSTEM_PROMPT,
     OpenAICompatibleClipDescriber,
     find_summary_rule_violations,
+    merge_segment_descriptions,
     prepare_request_frame_paths,
     select_even_full_clips,
     select_full_clips_by_index,
+    split_clip_frame_batches,
 )
 from medhorizon_videorag.vgent_baseline.schemas import VgentClipPlan
 
@@ -92,6 +98,79 @@ def test_pads_partial_tail_to_exact_request_length(tmp_path: Path) -> None:
     assert request_paths[60:] == [clip.frame_paths[-1]] * 4
 
 
+def test_splits_parent_clip_into_two_contiguous_32_frame_requests(
+    tmp_path: Path,
+) -> None:
+    clip = _clip(tmp_path, 2)
+
+    batches = split_clip_frame_batches(clip)
+
+    assert len(batches) == 2
+    assert batches[0].frame_paths == clip.frame_paths[:32]
+    assert batches[1].frame_paths == clip.frame_paths[32:]
+    assert [(item.start_seconds, item.end_seconds) for item in batches] == [
+        (128.0, 160.0),
+        (160.0, 192.0),
+    ]
+    assert all(item.padding_frame_count == 0 for item in batches)
+
+
+def test_splits_and_pads_each_half_of_partial_tail(tmp_path: Path) -> None:
+    clip = _clip(tmp_path, 2, 27)
+
+    batches = split_clip_frame_batches(clip)
+
+    assert [item.source_frame_count for item in batches] == [14, 13]
+    assert [item.padding_frame_count for item in batches] == [18, 19]
+    assert all(len(item.frame_paths) == 32 for item in batches)
+    assert batches[0].frame_paths[-1] == clip.frame_paths[13]
+    assert batches[1].frame_paths[0] == clip.frame_paths[14]
+    assert batches[1].frame_paths[-1] == clip.frame_paths[-1]
+
+
+def test_merges_segment_descriptions_without_model_inference() -> None:
+    first = {
+        "summary": "A metal instrument contacts reddish tissue.",
+        "observed_facts": {
+            "visible_anatomy": ["reddish tissue"],
+            "visible_instruments": ["metal instrument"],
+            "visible_objects": [],
+            "actions": [
+                {
+                    "subject": "metal instrument",
+                    "action": "contacts",
+                    "target": "reddish tissue",
+                }
+            ],
+            "state_changes": [],
+            "visual_evidence": ["The instrument tip touches the tissue."],
+        },
+        "medical_inferences": [],
+        "uncertainties": [],
+    }
+    second = {
+        **first,
+        "summary": "The metal instrument moves away from reddish tissue.",
+        "observed_facts": {
+            **first["observed_facts"],
+            "actions": [
+                {
+                    "subject": "metal instrument",
+                    "action": "moves away from",
+                    "target": "reddish tissue",
+                }
+            ],
+        },
+    }
+
+    merged = merge_segment_descriptions([first, second])
+
+    assert merged["summary"] == f"{first['summary']} {second['summary']}"
+    assert merged["observed_facts"]["visible_anatomy"] == ["reddish tissue"]
+    assert len(merged["observed_facts"]["actions"]) == 2
+    assert merged["medical_inferences"] == []
+
+
 def test_observation_first_prompt_contract() -> None:
     assert DESCRIPTION_PROMPT_VERSION == "medical_clip_observation_first_v10"
     assert "The summary MUST contain only directly visible information." in (
@@ -137,6 +216,25 @@ def test_resolved_description_errors_are_removed(tmp_path: Path) -> None:
     )
     _remove_resolved_errors(errors, {"pending"})
     assert not errors.exists()
+
+
+def test_segment_cache_keeps_only_unresolved_parent_clips(tmp_path: Path) -> None:
+    cache = tmp_path / ".descriptions.segments.jsonl"
+    cache.write_text(
+        '{"segment_id":"done:segment:00","clip_id":"done"}\n'
+        '{"segment_id":"pending:segment:00","clip_id":"pending"}\n',
+        encoding="utf-8",
+    )
+
+    assert set(_load_segment_cache(cache)) == {
+        "done:segment:00",
+        "pending:segment:00",
+    }
+    _remove_resolved_segment_cache(cache, {"done"})
+
+    assert set(_load_segment_cache(cache)) == {"pending:segment:00"}
+    _remove_resolved_segment_cache(cache, {"pending"})
+    assert not cache.exists()
 
 
 def test_retries_transient_server_error(monkeypatch: pytest.MonkeyPatch) -> None:

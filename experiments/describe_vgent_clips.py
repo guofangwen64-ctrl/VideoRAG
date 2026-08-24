@@ -19,8 +19,10 @@ from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT_VERSION,
     OpenAICompatibleClipDescriber,
     find_summary_rule_violations,
+    merge_segment_descriptions,
     select_even_full_clips,
     select_full_clips_by_index,
+    split_clip_frame_batches,
 )
 
 
@@ -99,6 +101,38 @@ def _remove_resolved_errors(path: Path, completed: set[str]) -> None:
     temporary.replace(path)
 
 
+def _load_segment_cache(path: Path) -> dict[str, dict]:
+    if not path.is_file():
+        return {}
+    return {
+        str(row["segment_id"]): row
+        for row in (
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+    }
+
+
+def _remove_resolved_segment_cache(path: Path, completed: set[str]) -> None:
+    if not path.is_file():
+        return
+    unresolved = [
+        row
+        for row in _load_segment_cache(path).values()
+        if str(row.get("clip_id", "")) not in completed
+    ]
+    if not unresolved:
+        path.unlink()
+        return
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in unresolved),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/vgent_baseline.yaml")
@@ -130,9 +164,12 @@ def main() -> None:
     config = load_config(args.config)
     description = config.vgent.get("description", {})
     frames_per_request = int(description.get("frames_per_request", 64))
+    frames_per_clip = int(description.get("frames_per_clip", frames_per_request))
     clip_count = args.clip_count or int(description.get("clip_count", 10))
-    if frames_per_request != 64:
-        raise ValueError("This VGent pilot requires exactly 64 frames per request")
+    if frames_per_clip != 64:
+        raise ValueError("This VGent pilot requires exactly 64 frames per clip")
+    if frames_per_clip % frames_per_request:
+        raise ValueError("frames_per_clip must be divisible by frames_per_request")
     plan = load_video_plan(args.manifest)
     if args.all_clips and args.clip_indices:
         raise ValueError("--all-clips and --clip-indices cannot be used together")
@@ -141,7 +178,7 @@ def main() -> None:
         selected = select_full_clips_by_index(
             plan.clips,
             indices,
-            frames_per_request=frames_per_request,
+            frames_per_request=frames_per_clip,
         )
     elif args.all_clips:
         selected = list(plan.clips)
@@ -149,7 +186,7 @@ def main() -> None:
         selected = select_even_full_clips(
             plan.clips,
             clip_count,
-            frames_per_request=frames_per_request,
+            frames_per_request=frames_per_clip,
         )
     _log(
         f"Selected {len(selected)} clips: "
@@ -176,6 +213,8 @@ def main() -> None:
     )
     output = Path(args.output)
     errors = Path(args.errors)
+    segment_cache_path = output.with_name(f".{output.stem}.segments.jsonl")
+    segment_cache = _load_segment_cache(segment_cache_path)
     completed = _completed_clip_ids(output)
     succeeded = resumed = failed = 0
     clip_progress = _progress(
@@ -193,7 +232,37 @@ def main() -> None:
             continue
         started = time.monotonic()
         try:
-            result = describer.describe(clip, frames_per_request=frames_per_request)
+            batches = split_clip_frame_batches(
+                clip,
+                frames_per_clip=frames_per_clip,
+                frames_per_request=frames_per_request,
+            )
+            segment_descriptions = []
+            total_attempts = 0
+            for batch in batches:
+                segment_id = f"{clip.id}:segment:{batch.index:02d}"
+                cached = segment_cache.get(segment_id)
+                if cached is None:
+                    segment_result = describer.describe_frame_paths(batch.frame_paths)
+                    cached = {
+                        "segment_id": segment_id,
+                        "clip_id": clip.id,
+                        "segment_index": batch.index,
+                        "start_seconds": batch.start_seconds,
+                        "end_seconds": batch.end_seconds,
+                        "source_frames": batch.source_frame_count,
+                        "input_frames": len(batch.frame_paths),
+                        "padding_frames": batch.padding_frame_count,
+                        "generation_attempts": describer.last_attempt_count,
+                        "description": segment_result,
+                    }
+                    _append_jsonl(segment_cache_path, cached)
+                    segment_cache[segment_id] = cached
+                total_attempts += int(cached.get("generation_attempts", 1))
+                segment_descriptions.append(cached)
+            result = merge_segment_descriptions(
+                [segment["description"] for segment in segment_descriptions]
+            )
             _append_jsonl(
                 output,
                 {
@@ -203,16 +272,20 @@ def main() -> None:
                     "start_seconds": clip.start_seconds,
                     "end_seconds": clip.end_seconds,
                     "source_frames": len(clip.frame_paths),
-                    "input_frames": frames_per_request,
-                    "padding_frames": frames_per_request - len(clip.frame_paths),
+                    "input_frames": frames_per_clip,
+                    "padding_frames": frames_per_clip - len(clip.frame_paths),
+                    "frames_per_request": frames_per_request,
+                    "request_count": len(batches),
                     "model": describer.model,
                     "prompt_version": DESCRIPTION_PROMPT_VERSION,
-                    "generation_attempts": describer.last_attempt_count,
+                    "description_merge": "deterministic_segment_union_v1",
+                    "generation_attempts": total_attempts,
                     "summary_rule_violations": find_summary_rule_violations(
                         str(result["summary"])
                     ),
                     "elapsed_seconds": round(time.monotonic() - started, 3),
                     "description": result,
+                    "segment_descriptions": segment_descriptions,
                 },
             )
             succeeded += 1
@@ -240,6 +313,7 @@ def main() -> None:
                 raise
     completed = _completed_clip_ids(output)
     _remove_resolved_errors(errors, completed)
+    _remove_resolved_segment_cache(segment_cache_path, completed)
     _log(
         f"Finished: {succeeded} described, {resumed} resumed, {failed} failed",
         progress=args.progress,
