@@ -115,6 +115,29 @@ def test_splits_parent_clip_into_two_contiguous_32_frame_requests(
     assert all(item.padding_frame_count == 0 for item in batches)
 
 
+def test_splits_parent_clip_into_four_contiguous_16_frame_requests(
+    tmp_path: Path,
+) -> None:
+    clip = _clip(tmp_path, 2)
+
+    batches = split_clip_frame_batches(clip, frames_per_request=16)
+
+    assert len(batches) == 4
+    assert [item.frame_paths for item in batches] == [
+        clip.frame_paths[0:16],
+        clip.frame_paths[16:32],
+        clip.frame_paths[32:48],
+        clip.frame_paths[48:64],
+    ]
+    assert [(item.start_seconds, item.end_seconds) for item in batches] == [
+        (128.0, 144.0),
+        (144.0, 160.0),
+        (160.0, 176.0),
+        (176.0, 192.0),
+    ]
+    assert all(item.padding_frame_count == 0 for item in batches)
+
+
 def test_splits_and_pads_each_half_of_partial_tail(tmp_path: Path) -> None:
     clip = _clip(tmp_path, 2, 27)
 
