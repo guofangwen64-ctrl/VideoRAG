@@ -12,7 +12,7 @@ vgent:
     base_url: https://api.agicto.cn/v1
     api_key_env: AGICTO_API_KEY
     frames_per_clip: 64
-    frames_per_request: 16
+    frames_per_request: 64
     max_image_pixels: 200704
     clip_count: 10
     max_tokens: 2048

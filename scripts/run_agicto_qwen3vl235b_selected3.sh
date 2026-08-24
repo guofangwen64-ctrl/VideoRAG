@@ -11,7 +11,7 @@ if [[ -z "${VIDEO_ROOT}" ]]; then
 fi
 
 CACHE_ROOT="${2:-artifacts/vgent_baseline/streaming_cache_selected3_qwen3vl235b}"
-OUTPUT_ROOT="${3:-artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10_4x16}"
+OUTPUT_ROOT="${3:-artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10}"
 VIDEO_KEYS=("079" "047" "grasp_CASE003")
 VIDEO_KEYS_CSV="$(IFS=,; echo "${VIDEO_KEYS[*]}")"
 MANIFEST_DIR="${CACHE_ROOT}/video_manifests"
