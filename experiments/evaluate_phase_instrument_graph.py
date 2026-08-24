@@ -51,16 +51,21 @@ def main() -> None:
         phase = extract_phase_name(item.question)
         if not phase:
             raise ValueError(f"Cannot extract phase from QA {uid}: {item.question}")
-        retrieval = retrieve_phase_boundary_instruments(
-            graph, phase, context_events=args.context_events
-        )
+        try:
+            retrieval = retrieve_phase_boundary_instruments(
+                graph, phase, context_events=args.context_events
+            )
+            unresolved_reason = None
+        except ValueError as error:
+            retrieval = None
+            unresolved_reason = str(error)
         option_map = {
             _canonical(_option_text(option)): _option_label(option, index)
             for index, option in enumerate(item.options)
         }
         matched = [
             instrument
-            for instrument in retrieval["instruments"]
+            for instrument in (retrieval["instruments"] if retrieval else [])
             if str(instrument["canonical_label"]) in option_map
         ]
         prediction = option_map[str(matched[0]["canonical_label"])] if matched else None
@@ -75,6 +80,7 @@ def main() -> None:
             "correct": prediction == item.answer,
             "matched_instrument": matched[0] if matched else None,
             "retrieval": retrieval,
+            "unresolved_reason": unresolved_reason,
             "candidate_aware_diagnostic": True,
         }
         rows.append(row)
