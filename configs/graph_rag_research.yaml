@@ -5,7 +5,7 @@ project:
   artifact_dir: artifacts/graph_rag
 pipeline:
   name: medical_graph_rag
-  status: evidence_graph_v2_1_with_deterministic_retrieval
+  status: semantic_hypothesis_v3_pilot
   baseline_compatible: true
 data:
   # Supply on the server through a local, untracked override or a future CLI flag.
@@ -18,10 +18,10 @@ chunking:
   event_window_seconds: 32
   event_stride_seconds: 16
 graph:
-  schema_version: medical-video-evidence-graph-v2.1
+  schema_version: medical-video-evidence-graph-v3-pilot
   scope: intra_video
-  node_types: [segment, entity_mention, concept, action_event, temporal_event]
-  edge_types: [temporal_before, contains, observed_in, instance_of, has_subject, acts_on, part_of, possible_continuation]
+  node_types: [segment, entity_mention, concept, action_event, temporal_event, phase_hypothesis, phase_boundary, instrument_track]
+  edge_types: [temporal_before, contains, observed_in, instance_of, has_subject, acts_on, part_of, possible_continuation, derived_from, has_boundary, grounded_by, visible_during, co_occurs]
   builder:
     provider: deterministic_observation_normalizer
     require_grounded_intervals: true
@@ -34,6 +34,12 @@ graph:
     event_structural_support: true
     event_representative_evidence: true
     use_medical_inferences: false
+  semantic_layer:
+    version: phase-boundary-instrument-track-v1
+    fact_status: medical_hypothesis
+    instrument_tracking_scope: type_presence_not_physical_identity
+    candidate_ontology: diagnostic_only
+    answers_used: false
 retrieval:
   strategy: deterministic_event_graph_v1
   initial_candidates: 20

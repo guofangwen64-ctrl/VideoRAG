@@ -65,6 +65,12 @@ builder 只消费 observation-first `observed_facts`，构建 clip、entity ment
 
 首版检索不依赖 LLM 或向量模型：复用 action/entity normalization 得到查询词，以 IDF 降低高频泛化实体的影响，在 temporal event 上聚合动作、实体、属性、clip lexical match、structural support 和 representative coverage。明确 `after` / `before` 时允许沿 event-level `temporal_before` 边做定向扩展；其他扩展必须增加查询词覆盖。输出保留 event、clip、时间和帧路径，并暴露每项分数与 reasoning path。该阶段只验证图检索链路，不声称完成医学多跳推理。
 
+### 阶段 1.7：医学语义假设层（v3 pilot 已实现）
+
+在 v2.1 observation graph 上增量构建 `phase_hypothesis`、`phase_boundary` 和 `instrument_track`。语义节点必须带来源、置信度、supporting events 和 `medical_hypothesis` 状态；原 observation nodes 和 edges 保持不变。器械轨迹只合并同类型的相邻出现，不断言物理实例身份。首个检索协议验证 `phase -> onset boundary -> event <- instrument track` 路径。
+
+当前单视频实验可从 Phase-Instrument 问题的公开题干和候选项构建候选 ontology，但不得读取答案，并必须报告为 candidate-aware diagnostic。正式 benchmark 需要将 ontology 固定为训练集或外部医学领域资源，避免测试问题参与建图。
+
 ### 阶段 2：数据协议
 
 构建一批不泄漏时间信息、人工核验且有一个或多个证据区间的问题。优先覆盖多跳、因果、时序顺序、跨阶段和器械—动作关联。

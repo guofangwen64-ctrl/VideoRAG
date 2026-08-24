@@ -15,6 +15,9 @@ NODE_TYPES = frozenset(
         "concept",
         "action_event",
         "temporal_event",
+        "phase_hypothesis",
+        "phase_boundary",
+        "instrument_track",
     }
 )
 EDGE_TYPES = frozenset(
@@ -31,6 +34,10 @@ EDGE_TYPES = frozenset(
         "has_subject",
         "part_of",
         "possible_continuation",
+        "derived_from",
+        "has_boundary",
+        "grounded_by",
+        "visible_during",
     }
 )
 REASONING_TYPES = frozenset(

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `baseline` | 已实现、可运行 | 固定 chunk、CLIP/时间检索和 VLM Reader；继续作为可复现对照 |
 | `vgent_baseline` | 1 FPS 切片、流式抽帧与结构化 clip 描述已实现 | 复现 VGent 的每 64 个采样帧一组，并对比无上限医学长视频适配与官方采样上限 |
-| `medical_graph_rag` | v2.1 可追溯证据图和确定性 event 检索 v1 已实现 | 将 observation 规范化为 mention、action、concept 与 temporal event，检索可追溯代表 clips，随后研究 VLM 验证与医学问答 |
+| `medical_graph_rag` | v2.1 observation 图、确定性 event 检索和 v3 pilot 语义假设层已实现 | 在可追溯 observation events 上派生 phase hypothesis、phase boundary 与 instrument type-presence track，再研究医学多跳问答 |
 
 现有 `medrag` CLI 仍然只运行原 baseline。VGent 前期验证使用独立脚本和 `artifacts/vgent_baseline/`；证据图也使用独立实验入口，不改变 baseline CLI。Graph-RAG 的研究假设、阶段计划和工程边界见 [docs/graph_rag_research_plan.md](docs/graph_rag_research_plan.md)，无时间泄漏、多证据区间 QA 的标注与评估协议见 [docs/medical_graph_qa_protocol.md](docs/medical_graph_qa_protocol.md)。
 
@@ -177,6 +177,39 @@ OPENAI_API_KEY=EMPTY python experiments/evaluate_graph_qa_qwen25vl.py \
 ```
 
 该实验会保存清理前后题干、route、Qwen event 排名、证据 clip、帧路径、预测和理由，便于把时间窗口 Reader 与无时间图检索分别诊断。它是研究实验入口，不改变原 baseline QA 协议。
+
+## v3 pilot：阶段边界与器械轨迹语义层
+
+v3 pilot 不修改 v2.1 observation facts，而是消费独立的语义假设 JSONL，派生三类节点：`phase_hypothesis`、`phase_boundary` 和 `instrument_track`。每个节点保留来源模型、置信度和 supporting event；`instrument_track` 仅表示同类器械在相邻事件中的持续出现，不表示已确认的同一物理实例。
+
+可先用 OpenAI-compatible VLM 对每个 temporal event 生成候选受限的语义假设：
+
+```bash
+OPENAI_API_KEY=EMPTY python experiments/infer_graph_semantic_hypotheses.py \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --annotations medhorizon_test.jsonl \
+  --video-key <video> \
+  --output artifacts/graph_rag/<video>/<run>/semantic_hypotheses.jsonl
+```
+
+当前 ontology 诊断模式只读取该视频 Phase-Instrument 问题中已经公开的 phase 名称和器械候选项，不读取答案；因此结果必须标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。正式实验应改用训练集或外部领域 ontology。
+
+随后增广图并评测阶段起点到器械轨迹的可追溯路径：
+
+```bash
+python experiments/augment_semantic_evidence_graph.py \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --hypotheses artifacts/graph_rag/<video>/<run>/semantic_hypotheses.jsonl \
+  --output-dir artifacts/graph_rag/<video>/<run>/semantic_graph
+
+python experiments/evaluate_phase_instrument_graph.py \
+  --annotations medhorizon_test.jsonl \
+  --graph artifacts/graph_rag/<video>/<run>/semantic_graph/semantic_evidence_graph.json \
+  --video-key <video> --qa-uids 2,3,4,5 \
+  --output-dir artifacts/graph_rag/<video>/<run>/phase_instrument_eval
+```
+
+检索路径为 `phase_hypothesis -> phase_boundary -> onset event <- instrument_track`，并默认附带一个紧邻 event 作为粗粒度 64 秒切片的边界上下文。语义节点均标记为医学假设，不会被序列化成直接观察事实。
 
 ## 时间证据恢复
 
