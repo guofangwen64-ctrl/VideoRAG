@@ -192,7 +192,7 @@ OPENAI_API_KEY=EMPTY python experiments/infer_graph_semantic_hypotheses.py \
   --output artifacts/graph_rag/<video>/<run>/semantic_hypotheses.jsonl
 ```
 
-当前 ontology 诊断模式只读取该视频 Phase-Instrument 问题中已经公开的 phase 名称和器械候选项，不读取答案；因此结果必须标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。正式实验应改用训练集或外部领域 ontology。
+当前 ontology 诊断模式只读取该视频 Phase-Instrument 题干中的目标 phase、器械候选项，以及 Action Recognition 题中公开的手术阶段候选项，不读取答案；因此结果必须标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。正式实验应改用训练集或外部领域 ontology。
 
 随后增广图并评测阶段起点到器械轨迹的可追溯路径：
 

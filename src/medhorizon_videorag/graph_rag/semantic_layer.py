@@ -417,15 +417,24 @@ def build_video_semantic_ontology(
     for item in questions:
         if str(getattr(item, "video_key", "")) != str(video_key):
             continue
-        if getattr(item, "task_name", None) != "Phase-Instrument Association":
-            continue
-        phase = extract_phase_name(str(getattr(item, "question", "")))
-        if phase:
-            phases.add(phase)
-        instruments.update(
-            _option_text(option) for option in getattr(item, "options", [])
-        )
-        source_uids.append(str(getattr(item, "uid", "")))
+        task_name = getattr(item, "task_name", None)
+        metadata = getattr(item, "metadata", {}) or {}
+        if task_name == "Phase-Instrument Association":
+            phase = extract_phase_name(str(getattr(item, "question", "")))
+            if phase:
+                phases.add(phase)
+            instruments.update(
+                _option_text(option) for option in getattr(item, "options", [])
+            )
+            source_uids.append(str(getattr(item, "uid", "")))
+        elif (
+            task_name == "Action Recognition"
+            and metadata.get("natural_rewrite_v1_kind") == "surgical_phase"
+        ):
+            phases.update(
+                _option_text(option) for option in getattr(item, "options", [])
+            )
+            source_uids.append(str(getattr(item, "uid", "")))
     if not phases or not instruments:
         raise ValueError(
             f"Video {video_key} has no phase-instrument candidate ontology"

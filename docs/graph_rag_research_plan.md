@@ -69,7 +69,7 @@ builder 只消费 observation-first `observed_facts`，构建 clip、entity ment
 
 在 v2.1 observation graph 上增量构建 `phase_hypothesis`、`phase_boundary` 和 `instrument_track`。语义节点必须带来源、置信度、supporting events 和 `medical_hypothesis` 状态；原 observation nodes 和 edges 保持不变。器械轨迹只合并同类型的相邻出现，不断言物理实例身份。首个检索协议验证 `phase -> onset boundary -> event <- instrument track` 路径。
 
-当前单视频实验可从 Phase-Instrument 问题的公开题干和候选项构建候选 ontology，但不得读取答案，并必须报告为 candidate-aware diagnostic。正式 benchmark 需要将 ontology 固定为训练集或外部医学领域资源，避免测试问题参与建图。
+当前单视频实验可从 Phase-Instrument 题干与器械候选项、Action Recognition 的手术阶段候选项构建候选 ontology，但不得读取答案，并必须报告为 candidate-aware diagnostic。正式 benchmark 需要将 ontology 固定为训练集或外部医学领域资源，避免测试问题参与建图。
 
 ### 阶段 2：数据协议
 

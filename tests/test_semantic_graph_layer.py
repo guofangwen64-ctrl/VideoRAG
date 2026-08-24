@@ -149,6 +149,7 @@ class _Question:
     question: str
     options: list[str]
     answer: str
+    metadata: dict
 
 
 def test_candidate_ontology_and_phase_parser_do_not_require_answers() -> None:
@@ -159,11 +160,26 @@ def test_candidate_ontology_and_phase_parser_do_not_require_answers() -> None:
         "Which instrument is in the field at the transition into the Left Atrium Suturing phase?",
         ["A. Needle Holder", "B. Aspirator"],
         "SECRET-ANSWER",
+        {},
     )
-    ontology = build_video_semantic_ontology([question], "087")
+    phase_options = _Question(
+        0,
+        "087",
+        "Action Recognition",
+        "Which phase is shown?",
+        ["A. Preparation", "B. Aortic Clamping"],
+        "ANOTHER-SECRET",
+        {"natural_rewrite_v1_kind": "surgical_phase"},
+    )
+    ontology = build_video_semantic_ontology([question, phase_options], "087")
 
     assert extract_phase_name(question.question) == "Left Atrium Suturing"
-    assert ontology["phases"] == ["Left Atrium Suturing"]
+    assert ontology["phases"] == [
+        "Aortic Clamping",
+        "Left Atrium Suturing",
+        "Preparation",
+    ]
     assert ontology["instruments"] == ["Aspirator", "Needle Holder"]
     assert ontology["answers_used"] is False
     assert "SECRET-ANSWER" not in str(ontology)
+    assert "ANOTHER-SECRET" not in str(ontology)
