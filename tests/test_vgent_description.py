@@ -296,6 +296,7 @@ def test_retries_transient_server_error(monkeypatch: pytest.MonkeyPatch) -> None
     describer.max_retries = 2
     describer.initial_retry_seconds = 30
     describer.max_retry_seconds = 300
+    describer.non_retryable_status_codes = frozenset()
     describer.last_attempt_count = 0
     sleeps = []
     monkeypatch.setattr(
@@ -309,3 +310,43 @@ def test_retries_transient_server_error(monkeypatch: pytest.MonkeyPatch) -> None
     assert completions.calls == 2
     assert describer.last_attempt_count == 2
     assert sleeps == [30]
+
+
+def test_does_not_retry_configured_http_500(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ServerError(Exception):
+        status_code = 500
+        response = SimpleNamespace(headers={})
+
+    completions = SimpleNamespace(calls=0)
+
+    def create(**request):
+        assert request["model"] == "test-model"
+        completions.calls += 1
+        raise ServerError("server busy")
+
+    completions.create = create
+    describer = OpenAICompatibleClipDescriber.__new__(OpenAICompatibleClipDescriber)
+    describer.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    describer.model = "test-model"
+    describer.max_tokens = 128
+    describer.response_format_json = False
+    describer.request_extra_body = {}
+    describer.max_retries = 8
+    describer.initial_retry_seconds = 30
+    describer.max_retry_seconds = 300
+    describer.non_retryable_status_codes = frozenset({500})
+    describer.last_attempt_count = 0
+    sleeps = []
+    monkeypatch.setattr(
+        "medhorizon_videorag.vgent_baseline.description.time.sleep",
+        sleeps.append,
+    )
+
+    with pytest.raises(ServerError, match="server busy"):
+        describer._request_payload([{"role": "user", "content": "test"}])
+
+    assert completions.calls == 1
+    assert describer.last_attempt_count == 1
+    assert sleeps == []

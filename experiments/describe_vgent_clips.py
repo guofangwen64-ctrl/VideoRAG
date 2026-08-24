@@ -227,6 +227,7 @@ def main() -> None:
         max_retries=int(description.get("max_retries", 2)),
         initial_retry_seconds=float(description.get("initial_retry_seconds", 10)),
         max_retry_seconds=float(description.get("max_retry_seconds", 120)),
+        non_retryable_status_codes=description.get("non_retryable_status_codes"),
         response_format_json=bool(description.get("response_format_json", True)),
         request_extra_body=description.get("request_extra_body"),
     )

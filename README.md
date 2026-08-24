@@ -135,6 +135,8 @@ export AGICTO_API_KEY='运行时提供，不要写入 Git'
 
 默认抽帧缓存位于 `artifacts/vgent_baseline/streaming_cache_selected3_qwen3vl235b/`，描述输出位于 `artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10/<video>/`，会直接复用已有成功记录。也可通过脚本第二、第三个参数覆盖这两个目录。对 429、常见 5xx、超时和连接错误采用较长的指数退避；中断后执行同一命令会跳过已成功 clip。脚本不执行构图或 QA。
 
+AGICTO 当前对 HTTP 500 不做重试：该 clip 立即写入 `errors.jsonl` 并继续后续 clip。429、502/503/504、超时和连接错误仍采用指数退避，避免把服务端限流或短暂网络故障误判为永久 clip 失败。
+
 `079` 的已有 32 条成功描述和失败诊断保持不变，待上游视觉服务恢复后再单独续跑。当前两个视频中的单 clip 在重试耗尽后会记录错误并继续后续 batch，不互相阻塞。
 
 生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。

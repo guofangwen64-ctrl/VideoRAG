@@ -408,6 +408,7 @@ class OpenAICompatibleClipDescriber:
         max_retries: int = 2,
         initial_retry_seconds: float = 10,
         max_retry_seconds: float = 120,
+        non_retryable_status_codes: Sequence[int] | None = None,
         response_format_json: bool = True,
         request_extra_body: dict[str, Any] | None = None,
     ) -> None:
@@ -436,6 +437,11 @@ class OpenAICompatibleClipDescriber:
         self.max_retries = max_retries
         self.initial_retry_seconds = initial_retry_seconds
         self.max_retry_seconds = max_retry_seconds
+        self.non_retryable_status_codes = frozenset(
+            int(code) for code in (non_retryable_status_codes or ())
+        )
+        if any(code < 400 or code > 599 for code in self.non_retryable_status_codes):
+            raise ValueError("non_retryable_status_codes must be HTTP error codes")
         if max_image_pixels <= 0:
             raise ValueError("max_image_pixels must be positive")
         self.max_image_pixels = max_image_pixels
@@ -516,9 +522,10 @@ class OpenAICompatibleClipDescriber:
             _validate_description_payload(payload)
         return payload
 
-    @staticmethod
-    def _is_retryable_error(error: Exception) -> bool:
+    def _is_retryable_error(self, error: Exception) -> bool:
         status_code = getattr(error, "status_code", None)
+        if status_code in self.non_retryable_status_codes:
+            return False
         if status_code in {408, 409, 429, 500, 502, 503, 504}:
             return True
         return type(error).__name__ in {

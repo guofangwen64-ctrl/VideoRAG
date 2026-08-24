@@ -20,5 +20,6 @@ vgent:
     max_retries: 8
     initial_retry_seconds: 30
     max_retry_seconds: 300
+    non_retryable_status_codes: [500]
     rewrite_summary_violations: false
     response_format_json: false
