@@ -5,6 +5,8 @@ import json
 import math
 import os
 import re
+import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -277,6 +279,8 @@ class OpenAICompatibleClipDescriber:
         max_image_pixels: int = 200704,
         rewrite_summary_violations: bool = True,
         max_retries: int = 2,
+        initial_retry_seconds: float = 10,
+        max_retry_seconds: float = 120,
         response_format_json: bool = True,
         request_extra_body: dict[str, Any] | None = None,
     ) -> None:
@@ -293,11 +297,18 @@ class OpenAICompatibleClipDescriber:
             api_key=api_key,
             base_url=base_url,
             timeout=timeout_seconds,
-            max_retries=max_retries,
+            max_retries=0,
         )
         self.model = model
         self.max_tokens = max_tokens
         self.last_attempt_count = 0
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if initial_retry_seconds <= 0 or max_retry_seconds <= 0:
+            raise ValueError("retry delays must be positive")
+        self.max_retries = max_retries
+        self.initial_retry_seconds = initial_retry_seconds
+        self.max_retry_seconds = max_retry_seconds
         if max_image_pixels <= 0:
             raise ValueError("max_image_pixels must be positive")
         self.max_image_pixels = max_image_pixels
@@ -308,6 +319,7 @@ class OpenAICompatibleClipDescriber:
     def describe(
         self, clip: VgentClipPlan, *, frames_per_request: int = 64
     ) -> dict[str, Any]:
+        self.last_attempt_count = 0
         request_paths = prepare_request_frame_paths(
             clip,
             frames_per_request=frames_per_request,
@@ -326,7 +338,6 @@ class OpenAICompatibleClipDescriber:
             {"role": "user", "content": content},
         ]
         payload = self._request_payload(messages)
-        self.last_attempt_count = 1
         _validate_description_payload(payload)
         violations = find_summary_rule_violations(str(payload["summary"]))
         if violations and self.rewrite_summary_violations:
@@ -367,9 +378,35 @@ class OpenAICompatibleClipDescriber:
                 # Preserve the already validated first response when only the
                 # optional observation rewrite returns malformed JSON.
                 pass
-            self.last_attempt_count = 2
             _validate_description_payload(payload)
         return payload
+
+    @staticmethod
+    def _is_retryable_error(error: Exception) -> bool:
+        status_code = getattr(error, "status_code", None)
+        if status_code in {408, 409, 429, 500, 502, 503, 504}:
+            return True
+        return type(error).__name__ in {
+            "APIConnectionError",
+            "APITimeoutError",
+            "TimeoutException",
+        }
+
+    def _retry_delay(self, error: Exception, retry_number: int) -> float:
+        delay = min(
+            self.initial_retry_seconds * (2**retry_number),
+            self.max_retry_seconds,
+        )
+        response = getattr(error, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers:
+            try:
+                retry_after = float(headers.get("retry-after", 0))
+            except (TypeError, ValueError):
+                retry_after = 0
+            if retry_after > 0:
+                delay = min(max(delay, retry_after), self.max_retry_seconds)
+        return delay
 
     def _request_payload(
         self,
@@ -387,7 +424,25 @@ class OpenAICompatibleClipDescriber:
             request["response_format"] = {"type": "json_object"}
         if self.request_extra_body:
             request["extra_body"] = self.request_extra_body
-        response = self.client.chat.completions.create(**request)
+        for retry_number in range(self.max_retries + 1):
+            self.last_attempt_count += 1
+            try:
+                response = self.client.chat.completions.create(**request)
+                break
+            except Exception as error:
+                if retry_number >= self.max_retries or not self._is_retryable_error(
+                    error
+                ):
+                    raise
+                delay = self._retry_delay(error, retry_number)
+                status_code = getattr(error, "status_code", "network")
+                print(
+                    f"Retryable API error HTTP {status_code}; retry "
+                    f"{retry_number + 1}/{self.max_retries} in {delay:g}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                time.sleep(delay)
         text = response.choices[0].message.content or ""
         return _parse_json_object(text)
 

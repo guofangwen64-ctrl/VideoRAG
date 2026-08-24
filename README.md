@@ -133,7 +133,7 @@ export AGICTO_API_KEY='运行时提供，不要写入 Git'
 ./scripts/run_agicto_qwen3vl235b_selected3.sh /path/to/MedHorizon
 ```
 
-默认抽帧缓存位于 `artifacts/vgent_baseline/streaming_cache_selected3_qwen3vl235b/`，描述输出位于 `artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10/<video>/`。也可通过脚本第二、第三个参数覆盖这两个目录。脚本不执行构图或 QA。
+默认抽帧缓存位于 `artifacts/vgent_baseline/streaming_cache_selected3_qwen3vl235b/`，描述输出位于 `artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10/<video>/`。也可通过脚本第二、第三个参数覆盖这两个目录。对 429、常见 5xx、超时和连接错误采用较长的指数退避；中断后执行同一命令会跳过已成功 clip。脚本不执行构图或 QA。
 
 生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。
 

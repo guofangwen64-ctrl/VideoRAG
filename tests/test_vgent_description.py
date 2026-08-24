@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +8,7 @@ from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT,
     DESCRIPTION_PROMPT_VERSION,
     OBSERVATION_FIRST_SYSTEM_PROMPT,
+    OpenAICompatibleClipDescriber,
     find_summary_rule_violations,
     prepare_request_frame_paths,
     select_even_full_clips,
@@ -135,3 +137,44 @@ def test_resolved_description_errors_are_removed(tmp_path: Path) -> None:
     )
     _remove_resolved_errors(errors, {"pending"})
     assert not errors.exists()
+
+
+def test_retries_transient_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ServerError(Exception):
+        status_code = 500
+        response = SimpleNamespace(headers={})
+
+    completions = SimpleNamespace()
+    completions.calls = 0
+
+    def create(**request):
+        assert request["model"] == "test-model"
+        completions.calls += 1
+        if completions.calls == 1:
+            raise ServerError("server busy")
+        message = SimpleNamespace(content='{"summary":"visible activity"}')
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    completions.create = create
+    describer = OpenAICompatibleClipDescriber.__new__(OpenAICompatibleClipDescriber)
+    describer.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    describer.model = "test-model"
+    describer.max_tokens = 128
+    describer.response_format_json = False
+    describer.request_extra_body = {}
+    describer.max_retries = 2
+    describer.initial_retry_seconds = 30
+    describer.max_retry_seconds = 300
+    describer.last_attempt_count = 0
+    sleeps = []
+    monkeypatch.setattr(
+        "medhorizon_videorag.vgent_baseline.description.time.sleep",
+        sleeps.append,
+    )
+
+    payload = describer._request_payload([{"role": "user", "content": "test"}])
+
+    assert payload == {"summary": "visible activity"}
+    assert completions.calls == 2
+    assert describer.last_attempt_count == 2
+    assert sleeps == [30]
