@@ -126,7 +126,7 @@ export MODELSCOPE_ACCESS_TOKEN='你的_ModelScope_Token'
 
 也可以直接给 `experiments/describe_vgent_clips.py` 传入 `--clip-indices 0,5,9` 复现实验子集。Token 只从环境变量读取，不得写入配置、脚本、日志或 Git。
 
-对筛选出的 `079`、`047` 和 `grasp_CASE003`，可使用独立批处理脚本顺序完成 1 FPS medical-streaming 抽帧和 Qwen3-VL-235B 全 clip 描述。每个 clip 保持原协议：64 秒、64 帧、原 clip ID，并在单次视觉请求中输入全部 64 帧；partial tail 复用最后一帧补齐。视频级和 clip 级均显示进度条，重跑时会跳过完整缓存和已成功 clip，并清除已经恢复成功的旧错误记录。
+当前批处理暂时跳过 `079`，只对 `047` 和 `grasp_CASE003` 顺序完成 1 FPS medical-streaming 抽帧和 Qwen3-VL-235B 全 clip 描述。每个 clip 保持原协议：64 秒、64 帧、原 clip ID，并在单次视觉请求中输入全部 64 帧；partial tail 复用最后一帧补齐。视频级和 clip 级均显示进度条，重跑时会跳过完整缓存和已成功 clip，并清除已经恢复成功的旧错误记录。
 
 ```bash
 export AGICTO_API_KEY='运行时提供，不要写入 Git'
@@ -135,7 +135,7 @@ export AGICTO_API_KEY='运行时提供，不要写入 Git'
 
 默认抽帧缓存位于 `artifacts/vgent_baseline/streaming_cache_selected3_qwen3vl235b/`，描述输出位于 `artifacts/vgent_baseline/agicto_qwen3vl235b_selected3_observation_first_v10/<video>/`，会直接复用已有成功记录。也可通过脚本第二、第三个参数覆盖这两个目录。对 429、常见 5xx、超时和连接错误采用较长的指数退避；中断后执行同一命令会跳过已成功 clip。脚本不执行构图或 QA。
 
-当前批处理显式跳过已确认会触发上游视觉服务 HTTP 500 的 `079_vgent_00032`，继续生成其余父 clip；该父 clip 可在上游恢复或采用自适应细分后单独补跑。其他单 clip 在重试耗尽后记录错误并继续后续 batch，不阻塞另外两个视频。
+`079` 的已有 32 条成功描述和失败诊断保持不变，待上游视觉服务恢复后再单独续跑。当前两个视频中的单 clip 在重试耗尽后会记录错误并继续后续 batch，不互相阻塞。
 
 生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。
 
