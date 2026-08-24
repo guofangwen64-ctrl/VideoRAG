@@ -51,6 +51,54 @@ def _safe_error(error: Exception) -> str:
     return message[:2000]
 
 
+def _progress(items, *, enabled: bool, description: str):
+    if not enabled:
+        return items
+    try:
+        from tqdm.auto import tqdm
+    except ImportError as error:
+        raise RuntimeError("Install progress support: pip install tqdm") from error
+    return tqdm(
+        items,
+        total=len(items),
+        desc=description,
+        unit="clip",
+        dynamic_ncols=True,
+    )
+
+
+def _log(message: str, *, progress: bool) -> None:
+    if progress:
+        from tqdm.auto import tqdm
+
+        tqdm.write(message)
+    else:
+        print(message, flush=True)
+
+
+def _remove_resolved_errors(path: Path, completed: set[str]) -> None:
+    if not path.is_file():
+        return
+    unresolved = [
+        row
+        for row in (
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+        if str(row.get("clip_id", "")) not in completed
+    ]
+    if not unresolved:
+        path.unlink()
+        return
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in unresolved),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/vgent_baseline.yaml")
@@ -73,6 +121,9 @@ def main() -> None:
         "--fail-fast",
         action="store_true",
         help="Stop after the first failed request instead of continuing the batch",
+    )
+    parser.add_argument(
+        "--progress", action="store_true", help="Show a clip progress bar"
     )
     args = parser.parse_args()
 
@@ -100,8 +151,11 @@ def main() -> None:
             clip_count,
             frames_per_request=frames_per_request,
         )
-    print(
-        f"Selected clip indices: {[clip.clip_index for clip in selected]}", flush=True
+    _log(
+        f"Selected {len(selected)} clips: "
+        f"{selected[0].clip_index if selected else '-'}.."
+        f"{selected[-1].clip_index if selected else '-'}",
+        progress=args.progress,
     )
 
     describer = OpenAICompatibleClipDescriber(
@@ -122,10 +176,18 @@ def main() -> None:
     errors = Path(args.errors)
     completed = _completed_clip_ids(output)
     succeeded = resumed = failed = 0
-    for number, clip in enumerate(selected, start=1):
+    clip_progress = _progress(
+        selected,
+        enabled=args.progress,
+        description=f"{plan.video_id} Qwen3-VL descriptions",
+    )
+    for number, clip in enumerate(clip_progress, start=1):
         if clip.id in completed:
             resumed += 1
-            print(f"[{number}/{len(selected)}] {clip.id}: already complete", flush=True)
+            _log(
+                f"[{number}/{len(selected)}] {clip.id}: already complete",
+                progress=args.progress,
+            )
             continue
         started = time.monotonic()
         try:
@@ -152,9 +214,12 @@ def main() -> None:
                 },
             )
             succeeded += 1
-            print(f"[{number}/{len(selected)}] {clip.id}: complete", flush=True)
+            _log(
+                f"[{number}/{len(selected)}] {clip.id}: complete",
+                progress=args.progress,
+            )
         # Persist unpredictable client/server failures so the pilot can resume.
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             failed += 1
             _append_jsonl(
                 errors,
@@ -165,15 +230,17 @@ def main() -> None:
                     "error": _safe_error(error),
                 },
             )
-            print(
+            _log(
                 f"[{number}/{len(selected)}] {clip.id}: FAILED {_safe_error(error)}",
-                flush=True,
+                progress=args.progress,
             )
             if args.fail_fast:
                 raise
-    print(
+    completed = _completed_clip_ids(output)
+    _remove_resolved_errors(errors, completed)
+    _log(
         f"Finished: {succeeded} described, {resumed} resumed, {failed} failed",
-        flush=True,
+        progress=args.progress,
     )
 
 

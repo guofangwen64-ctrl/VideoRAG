@@ -1,0 +1,21 @@
+# Qwen3-VL-235B observation-first descriptions through the AGICTO endpoint.
+# The API key is read only from AGICTO_API_KEY.
+project:
+  seed: 42
+  artifact_dir: artifacts/vgent_baseline
+pipeline:
+  name: vgent_agicto_qwen3vl235b_selected_video_descriptions
+  status: selected_video_batch
+vgent:
+  description:
+    model: qwen3-vl-235b-a22b-instruct
+    base_url: https://api.agicto.cn/v1
+    api_key_env: AGICTO_API_KEY
+    frames_per_request: 64
+    max_image_pixels: 200704
+    clip_count: 10
+    max_tokens: 2048
+    timeout_seconds: 600
+    max_retries: 8
+    rewrite_summary_violations: false
+    response_format_json: false

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from experiments.describe_vgent_clips import _remove_resolved_errors
 from medhorizon_videorag.vgent_baseline.description import (
     DESCRIPTION_PROMPT,
     DESCRIPTION_PROMPT_VERSION,
@@ -118,3 +119,19 @@ def test_finds_summary_rule_violations_without_substring_false_positives() -> No
     assert (
         find_summary_rule_violations("A small tubular structure remains visible.") == []
     )
+
+
+def test_resolved_description_errors_are_removed(tmp_path: Path) -> None:
+    errors = tmp_path / "errors.jsonl"
+    errors.write_text(
+        '{"clip_id":"done","error":"old"}\n{"clip_id":"pending","error":"retry"}\n',
+        encoding="utf-8",
+    )
+
+    _remove_resolved_errors(errors, {"done"})
+
+    assert errors.read_text(encoding="utf-8") == (
+        '{"clip_id": "pending", "error": "retry"}\n'
+    )
+    _remove_resolved_errors(errors, {"pending"})
+    assert not errors.exists()
