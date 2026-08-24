@@ -37,11 +37,15 @@ for video_key in "${VIDEO_KEYS[@]}"; do
     exit 1
   fi
   video_output="${OUTPUT_ROOT}/${video_key}"
+  extra_args=()
+  if [[ "${video_key}" == "079" ]]; then
+    extra_args+=(--skip-clip-indices 32)
+  fi
   python experiments/describe_vgent_clips.py \
     --config configs/vgent_agicto_qwen3vl235b.yaml \
     --manifest "${manifests[0]}" \
     --all-clips \
-    --fail-fast \
+    "${extra_args[@]}" \
     --progress \
     --output "${video_output}/descriptions.jsonl" \
     --errors "${video_output}/errors.jsonl"

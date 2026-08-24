@@ -5,6 +5,7 @@ import pytest
 
 from experiments.describe_vgent_clips import (
     _load_segment_cache,
+    _parse_clip_indices,
     _remove_resolved_errors,
     _remove_resolved_segment_cache,
 )
@@ -258,6 +259,15 @@ def test_segment_cache_keeps_only_unresolved_parent_clips(tmp_path: Path) -> Non
     assert set(_load_segment_cache(cache)) == {"pending:segment:00"}
     _remove_resolved_segment_cache(cache, {"pending"})
     assert not cache.exists()
+
+
+def test_parses_unique_non_negative_clip_indices() -> None:
+    assert _parse_clip_indices("32, 7", option="--skip-clip-indices") == [32, 7]
+    assert _parse_clip_indices(None, option="--skip-clip-indices") == []
+    with pytest.raises(ValueError, match="unique, non-negative"):
+        _parse_clip_indices("32,32", option="--skip-clip-indices")
+    with pytest.raises(ValueError, match="unique, non-negative"):
+        _parse_clip_indices("-1", option="--skip-clip-indices")
 
 
 def test_retries_transient_server_error(monkeypatch: pytest.MonkeyPatch) -> None:

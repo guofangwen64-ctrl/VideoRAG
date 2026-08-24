@@ -133,6 +133,15 @@ def _remove_resolved_segment_cache(path: Path, completed: set[str]) -> None:
     temporary.replace(path)
 
 
+def _parse_clip_indices(value: str | None, *, option: str) -> list[int]:
+    if not value:
+        return []
+    indices = [int(item.strip()) for item in value.split(",") if item.strip()]
+    if len(indices) != len(set(indices)) or any(index < 0 for index in indices):
+        raise ValueError(f"{option} must contain unique, non-negative indices")
+    return indices
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/vgent_baseline.yaml")
@@ -145,6 +154,10 @@ def main() -> None:
     parser.add_argument(
         "--clip-indices",
         help="Comma-separated exact complete clip indices; overrides --clip-count",
+    )
+    parser.add_argument(
+        "--skip-clip-indices",
+        help="Comma-separated clip indices to omit from the selected batch",
     )
     parser.add_argument(
         "--all-clips",
@@ -174,7 +187,7 @@ def main() -> None:
     if args.all_clips and args.clip_indices:
         raise ValueError("--all-clips and --clip-indices cannot be used together")
     if args.clip_indices:
-        indices = [int(value.strip()) for value in args.clip_indices.split(",")]
+        indices = _parse_clip_indices(args.clip_indices, option="--clip-indices")
         selected = select_full_clips_by_index(
             plan.clips,
             indices,
@@ -188,6 +201,12 @@ def main() -> None:
             clip_count,
             frames_per_request=frames_per_clip,
         )
+    skipped_indices = set(
+        _parse_clip_indices(args.skip_clip_indices, option="--skip-clip-indices")
+    )
+    selected = [clip for clip in selected if clip.clip_index not in skipped_indices]
+    if not selected:
+        raise ValueError("No clips remain after applying --skip-clip-indices")
     _log(
         f"Selected {len(selected)} clips: "
         f"{selected[0].clip_index if selected else '-'}.."
