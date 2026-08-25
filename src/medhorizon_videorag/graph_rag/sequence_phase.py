@@ -185,7 +185,8 @@ def build_strict_phase_mapping_prompt(
         "5. Do not force a complete named-phase timeline. Unknown is preferred over a "
         "weak label.\n"
         "6. distinctive_cues may contain only evidence already stated in the activity "
-        "segment.\n\n"
+        "segment. Return 1-3 concise distinctive_cues, 1-3 concise missing_evidence "
+        "items, and a basis of at most 40 words for each mapping.\n\n"
         "Candidate phases:\n- "
         + "\n- ".join(labels)
         + "\n\nOpen activity segments:\n"

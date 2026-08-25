@@ -127,20 +127,26 @@ def main() -> None:
         client,
         model=args.model,
         prompt=prompt,
-        max_tokens=4096,
+        max_tokens=8192,
         max_retries=args.max_retries,
         initial_retry_seconds=args.initial_retry_seconds,
         max_retry_seconds=args.max_retry_seconds,
     )
-    raw_mapping = _parse_json_object(response.choices[0].message.content or "")
+    raw_mapping_text = response.choices[0].message.content or ""
+    (output / "stage2_raw_response.txt").write_text(
+        raw_mapping_text + "\n", encoding="utf-8"
+    )
+    stage2_metric = _metrics(
+        "strict_phase_mapping", prompt, response, attempts, elapsed
+    )
+    _write_json(output / "stage2_request_metadata.json", stage2_metric)
+    raw_mapping = _parse_json_object(raw_mapping_text)
     segments = normalize_strict_phase_mapping_response(
         raw_mapping, activities, ontology["phases"]
     )
     source = f"openai_compatible:{args.model}:{TWO_STAGE_SEQUENCE_PHASE_VERSION}"
     event_rows = project_sequence_phases_to_events(graph, segments, source=source)
-    stage_metrics.append(
-        _metrics("strict_phase_mapping", prompt, response, attempts, elapsed)
-    )
+    stage_metrics.append(stage2_metric)
 
     _write_json(output / "stage2_raw_response.json", raw_mapping)
     _write_json(
