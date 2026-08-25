@@ -391,13 +391,18 @@ def project_sequence_phases_to_events(
             basis = "No supporting clip was covered by the sequence segmentation."
             segment_ids: list[str] = []
         else:
-            votes = Counter(str(item["label"]) for item in matched)
+            named = [item for item in matched if item["label"] != "unknown"]
+            candidates = named or matched
+            votes = Counter(str(item["label"]) for item in candidates)
             label = min(votes, key=lambda value: (-votes[value], value))
-            winning = [item for item in matched if item["label"] == label]
+            winning = [item for item in candidates if item["label"] == label]
             confidence = min(
                 (str(item["confidence"]) for item in winning),
                 key=lambda value: _CONFIDENCE[value],
             )
+            coverage = votes[label] / len(matched)
+            if label != "unknown" and coverage < 0.5:
+                confidence = "low"
             segment_ids = list(
                 dict.fromkeys(str(item["segment_id"]) for item in winning)
             )

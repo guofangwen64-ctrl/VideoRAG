@@ -132,6 +132,50 @@ def test_project_sequence_phases_to_temporal_events() -> None:
     assert rows[0]["instrument_hypotheses"] == []
 
 
+def test_named_phase_is_not_outvoted_by_unknown_within_coarse_event() -> None:
+    compact = compact_observation_sequence(_rows())
+    payload = {
+        "phase_segments": [
+            {
+                "label": "unknown",
+                "start_clip_id": "case_vgent_00000",
+                "end_clip_id": "case_vgent_00000",
+                "confidence": "low",
+                "basis_clip_ids": ["case_vgent_00000"],
+                "basis": "insufficient evidence",
+            },
+            {
+                "label": "Preparation",
+                "start_clip_id": "case_vgent_00001",
+                "end_clip_id": "case_vgent_00001",
+                "confidence": "medium",
+                "basis_clip_ids": ["case_vgent_00001"],
+                "basis": "distinctive setup cue",
+            },
+            {
+                "label": "unknown",
+                "start_clip_id": "case_vgent_00002",
+                "end_clip_id": "case_vgent_00003",
+                "confidence": "low",
+                "basis_clip_ids": ["case_vgent_00002"],
+                "basis": "insufficient evidence",
+            },
+        ]
+    }
+    segments = normalize_sequence_phase_response(
+        payload, compact, ["Preparation"]
+    )
+    rows = project_sequence_phases_to_events(_graph(), segments, source="test-model")
+    assert rows[0]["phase_hypothesis"] == {
+        "label": "Preparation",
+        "confidence": "medium",
+        "basis": (
+            "Sequence-level phase segment vote covers 1/2 supporting clips; "
+            "sources: sequence_phase:00001."
+        ),
+    }
+
+
 def _activity_payload() -> dict:
     return {
         "activity_segments": [
