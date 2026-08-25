@@ -67,10 +67,27 @@ def main() -> None:
     stage_metrics = []
     resumed_stage1 = args.resume and (output / "open_activity_segments.json").is_file()
     activity_path = output / "open_activity_segments.json"
+    stage1_raw_path = output / "stage1_raw_response.json"
     if resumed_stage1:
         activity_payload = json.loads(activity_path.read_text(encoding="utf-8"))
         activities = activity_payload["segments"]
         print(f"Resumed {len(activities)} open activity segments", flush=True)
+    elif args.resume and stage1_raw_path.is_file():
+        raw = json.loads(stage1_raw_path.read_text(encoding="utf-8"))
+        activities = normalize_open_activity_response(raw, compact)
+        _write_json(
+            activity_path,
+            {
+                "video_id": args.video_key,
+                "version": TWO_STAGE_SEQUENCE_PHASE_VERSION,
+                "segments": activities,
+            },
+        )
+        resumed_stage1 = True
+        print(
+            f"Recovered {len(activities)} open activity segments from raw response",
+            flush=True,
+        )
     else:
         prompt = build_open_activity_segmentation_prompt(compact)
         response, attempts, elapsed = _request(
@@ -83,9 +100,13 @@ def main() -> None:
             max_retry_seconds=args.max_retry_seconds,
         )
         raw = _parse_json_object(response.choices[0].message.content or "")
-        activities = normalize_open_activity_response(raw, compact)
         output.mkdir(parents=True, exist_ok=True)
-        _write_json(output / "stage1_raw_response.json", raw)
+        _write_json(stage1_raw_path, raw)
+        stage1_metric = _metrics(
+            "open_activity_segmentation", prompt, response, attempts, elapsed
+        )
+        _write_json(output / "stage1_request_metadata.json", stage1_metric)
+        activities = normalize_open_activity_response(raw, compact)
         _write_json(
             activity_path,
             {
@@ -94,10 +115,7 @@ def main() -> None:
                 "segments": activities,
             },
         )
-        stage_metrics.append(
-            _metrics("open_activity_segmentation", prompt, response, attempts, elapsed)
-        )
-        _write_json(output / "stage1_request_metadata.json", stage_metrics[0])
+        stage_metrics.append(stage1_metric)
         print(f"Stage 1: inferred {len(activities)} open activity segments", flush=True)
 
     final_path = output / "sequence_phase_segments.json"
