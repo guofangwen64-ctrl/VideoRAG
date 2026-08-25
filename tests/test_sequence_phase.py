@@ -204,3 +204,38 @@ def test_strict_mapping_rejects_generic_or_low_confidence_labels() -> None:
     assert segments[0]["mapping_accepted"] is False
     assert segments[1]["label"] == "Perfusion Needle Spacer Suturing"
     assert segments[1]["mapping_accepted"] is True
+
+
+def test_open_activity_basis_is_uniformly_reduced_to_five_clips() -> None:
+    rows = _rows() + [
+        {
+            **_rows()[0],
+            "clip_id": f"case_vgent_{index:05d}",
+            "clip_index": index,
+            "start_seconds": index * 64.0,
+            "end_seconds": (index + 1) * 64.0,
+        }
+        for index in range(4, 8)
+    ]
+    compact = compact_observation_sequence(rows)
+    payload = {
+        "activity_segments": [
+            {
+                "activity_label": "continued tool manipulation",
+                "start_clip_id": "case_vgent_00000",
+                "end_clip_id": "case_vgent_00007",
+                "confidence": "medium",
+                "basis_clip_ids": [item["clip_id"] for item in rows],
+                "observed_pattern": "a tool repeatedly contacts visible material",
+                "boundary_reason": "video start",
+            }
+        ]
+    }
+    activities = normalize_open_activity_response(payload, compact)
+    assert activities[0]["basis_clip_ids"] == [
+        "case_vgent_00000",
+        "case_vgent_00002",
+        "case_vgent_00004",
+        "case_vgent_00005",
+        "case_vgent_00007",
+    ]

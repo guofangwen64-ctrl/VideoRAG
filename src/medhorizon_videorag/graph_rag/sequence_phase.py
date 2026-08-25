@@ -446,8 +446,11 @@ def _validate_basis_clip_ids(
         raise TypeError("basis_clip_ids must be a list")
     support = list(dict.fromkeys(str(value) for value in support))
     valid = set(valid_clip_ids)
-    if not 1 <= len(support) <= 5 or any(clip_id not in valid for clip_id in support):
-        raise ValueError("basis_clip_ids must contain 1-5 IDs inside the segment")
+    if not support or any(clip_id not in valid for clip_id in support):
+        raise ValueError("basis_clip_ids must contain IDs inside the segment")
+    if len(support) > 5:
+        positions = [round(index * (len(support) - 1) / 4) for index in range(5)]
+        support = [support[position] for position in positions]
     return support
 
 
