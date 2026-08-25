@@ -51,6 +51,7 @@ from .schemas import (
     VideoEvidenceGraph,
 )
 from .semantic_layer import (
+    APPEARANCE_TRACK_VERSION,
     SEMANTIC_GRAPH_SCHEMA_VERSION,
     SEMANTIC_LAYER_VERSION,
     SemanticLayerArtifacts,
@@ -77,6 +78,7 @@ from .sequence_phase import (
 
 __all__ = [
     "ACTION_VOCABULARY",
+    "APPEARANCE_TRACK_VERSION",
     "BUILDER_VERSION",
     "ENTITY_VOCABULARY",
     "EVENT_SUPPORT_VERSION",

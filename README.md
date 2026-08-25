@@ -207,12 +207,15 @@ OPENAI_API_KEY=EMPTY python experiments/infer_graph_semantic_hypotheses.py \
 
 当前 ontology 诊断模式只读取该视频 Phase-Instrument 题干中的目标 phase、器械候选项，以及 Action Recognition 题中公开的手术阶段候选项，不读取答案；因此结果必须标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。正式实验应改用训练集或外部领域 ontology。
 
-随后增广图并评测阶段起点到器械轨迹的可追溯路径：
+随后增广图并评测阶段起点到器械轨迹的可追溯路径。推荐合并模式直接从
+v2.1 observation 中的 `visible_instruments` mention 构建外观级轨迹，不要求模型或人工先给出
+精确医学器械名：
 
 ```bash
 python experiments/augment_semantic_evidence_graph.py \
   --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
   --hypotheses artifacts/graph_rag/<video>/<run>/semantic_hypotheses.jsonl \
+  --instrument-track-source appearance_mentions \
   --output-dir artifacts/graph_rag/<video>/<run>/semantic_graph
 
 python experiments/evaluate_phase_instrument_graph.py \
@@ -222,7 +225,7 @@ python experiments/evaluate_phase_instrument_graph.py \
   --output-dir artifacts/graph_rag/<video>/<run>/phase_instrument_eval
 ```
 
-检索路径为 `phase_hypothesis -> phase_boundary -> onset event <- instrument_track`，并默认附带一个紧邻 event 作为粗粒度 64 秒切片的边界上下文。语义节点均标记为医学假设，不会被序列化成直接观察事实。
+检索路径为 `phase_hypothesis -> phase_boundary -> onset event <- instrument_track`，并默认附带一个紧邻 event 作为粗粒度 64 秒切片的边界上下文。阶段和边界节点标记为医学假设；外观轨迹标记为 `derived_observation_track`，保存颜色、形状、材质、可见标记、动作角色、原始 mention 和代表证据。其 `canonical_instrument` 固定为 `unknown`、`physical_identity_confirmed` 固定为 `false`：它只把相邻事件中的相同外观类型连接起来，不宣称已经识别出 Needle Holder 等精确器械，也不宣称是同一物理实例。最终由 Reader 结合候选项与代表帧完成器械判断。
 
 ### 序列级阶段推断（v3.1 pilot）
 

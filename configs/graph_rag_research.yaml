@@ -37,7 +37,10 @@ graph:
   semantic_layer:
     version: phase-boundary-instrument-track-v1
     fact_status: medical_hypothesis
-    instrument_tracking_scope: type_presence_not_physical_identity
+    instrument_track_source: appearance_mentions
+    instrument_tracking_scope: appearance_type_presence_not_physical_identity
+    canonical_instrument_default: unknown
+    physical_identity_confirmed: false
     candidate_ontology: diagnostic_only
     answers_used: false
     sequence_phase_inference:

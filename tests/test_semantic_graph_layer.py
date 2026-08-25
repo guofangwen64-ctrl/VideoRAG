@@ -141,6 +141,109 @@ def test_phase_boundary_retrieval_returns_onset_and_next_event(tmp_path: Path) -
     assert result["reasoning_path"][1] == "has_boundary"
 
 
+def test_appearance_tracks_keep_medical_identity_unknown(tmp_path: Path) -> None:
+    graph = _base_graph(tmp_path)
+    nodes = list(graph.nodes)
+    edges = list(graph.edges)
+    for index, (label, canonical, attributes) in enumerate(
+        (
+            (
+                "metal surgical instrument",
+                "generic_instrument",
+                {"material": ["metal"]},
+            ),
+            ("needle-like instrument", "needle_like_instrument", {}),
+            ("needle-like instrument", "needle_like_instrument", {}),
+            (
+                "curved metal instrument",
+                "generic_instrument",
+                {"shape": ["curved"]},
+            ),
+        )
+    ):
+        event = next(node for node in nodes if node.id == f"event:case:{index:05d}")
+        mention = GraphNode(
+            f"mention:case:{index:05d}",
+            "case",
+            "entity_mention",
+            label,
+            list(event.evidence),
+            metadata={
+                "canonical": canonical,
+                "category": "instrument",
+                "source_field": "visible_instruments",
+                "attributes": attributes,
+                "clip_id": f"case_vgent_{index:05d}",
+            },
+        )
+        nodes.append(mention)
+        edges.append(
+            GraphEdge(
+                mention.id,
+                f"clip:case_vgent_{index:05d}",
+                "observed_in",
+            )
+        )
+        if index == 1:
+            action = GraphNode(
+                "action:case:pull",
+                "case",
+                "action_event",
+                "pull",
+                list(event.evidence),
+            )
+            nodes.append(action)
+            edges.append(GraphEdge(action.id, mention.id, "has_subject"))
+    graph = VideoEvidenceGraph("case", nodes, edges, "test-v2.1")
+
+    artifacts = augment_with_semantic_hypotheses(
+        graph,
+        _hypotheses(),
+        instrument_track_source="appearance_mentions",
+    )
+    tracks = [
+        node for node in artifacts.graph.nodes if node.node_type == "instrument_track"
+    ]
+    needle_track = next(
+        node
+        for node in tracks
+        if node.metadata["canonical_label"] == "needle_like_instrument"
+    )
+
+    assert len(tracks) == 3
+    assert needle_track.metadata["supporting_event_ids"] == [
+        "event:case:00001",
+        "event:case:00002",
+    ]
+    assert needle_track.metadata["canonical_instrument"] == "unknown"
+    assert needle_track.metadata["physical_identity_confirmed"] is False
+    assert needle_track.metadata["fact_status"] == "derived_observation_track"
+    assert needle_track.metadata["detections"][0]["action_roles"] == ["subject:pull"]
+    result = retrieve_phase_boundary_instruments(
+        artifacts.graph, "Left Atrium Suturing", context_events=1
+    )
+    retrieved = next(
+        item
+        for item in result["instruments"]
+        if item["canonical_label"] == "needle_like_instrument"
+    )
+    assert retrieved["canonical_instrument"] == "unknown"
+    assert retrieved["physical_identity_confirmed"] is False
+
+
+def test_semantic_layer_rejects_unknown_track_source(tmp_path: Path) -> None:
+    try:
+        augment_with_semantic_hypotheses(
+            _base_graph(tmp_path),
+            _hypotheses(),
+            instrument_track_source="invalid",
+        )
+    except ValueError as error:
+        assert "instrument_track_source" in str(error)
+    else:
+        raise AssertionError("Expected invalid track source to fail")
+
+
 @dataclass
 class _Question:
     uid: int

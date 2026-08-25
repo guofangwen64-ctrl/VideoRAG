@@ -12,6 +12,7 @@ from .schemas import EvidenceInterval, GraphEdge, GraphNode, VideoEvidenceGraph
 
 SEMANTIC_LAYER_VERSION = "phase-boundary-instrument-track-v1"
 SEMANTIC_GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v3-pilot"
+APPEARANCE_TRACK_VERSION = "appearance-instrument-track-v1"
 
 _CONFIDENCE = {"high": 0.9, "medium": 0.65, "low": 0.35}
 _UNKNOWN_LABELS = {"", "none", "null", "unknown", "uncertain", "not visible"}
@@ -45,10 +46,19 @@ def augment_with_semantic_hypotheses(
     hypotheses: Sequence[dict[str, Any]],
     *,
     max_instrument_gap_events: int = 1,
+    instrument_track_source: str = "semantic_hypotheses",
 ) -> SemanticLayerArtifacts:
     """Add explicitly derived medical hypotheses without changing observation facts."""
     if max_instrument_gap_events < 0:
         raise ValueError("max_instrument_gap_events must be non-negative")
+    if instrument_track_source not in {
+        "semantic_hypotheses",
+        "appearance_mentions",
+    }:
+        raise ValueError(
+            "instrument_track_source must be semantic_hypotheses or "
+            "appearance_mentions"
+        )
     if any(
         node.node_type in {"phase_hypothesis", "phase_boundary", "instrument_track"}
         for node in graph.nodes
@@ -156,91 +166,27 @@ def augment_with_semantic_hypotheses(
                 ]
             )
 
-    instrument_detections: dict[str, list[tuple[GraphNode, str, float, str]]] = (
-        defaultdict(list)
-    )
-    for event in events:
-        row = row_by_event.get(event.id, {})
-        seen: set[str] = set()
-        for item in _instrument_items(row):
-            label = str(item.get("label", "")).strip()
-            canonical = _canonical_label(label)
-            if canonical in _UNKNOWN_LABELS or canonical in seen:
-                continue
-            seen.add(canonical)
-            instrument_detections[canonical].append(
-                (
-                    event,
-                    label,
-                    _confidence(item.get("confidence")),
-                    str(item.get("basis", "")).strip(),
-                )
-            )
-
-    track_count = 0
-    for canonical, detections in sorted(instrument_detections.items()):
-        runs = _detection_runs(
-            detections, event_position, max_gap=max_instrument_gap_events
+    if instrument_track_source == "appearance_mentions":
+        track_count = _append_appearance_instrument_tracks(
+            graph,
+            events,
+            event_position,
+            phase_event_membership,
+            nodes,
+            edges,
+            max_gap=max_instrument_gap_events,
         )
-        for run in runs:
-            track_id = f"instrument_track:{graph.video_id}:{track_count:05d}"
-            track_count += 1
-            event_ids = [item[0].id for item in run]
-            confidence = _mean(item[2] for item in run)
-            evidence = _dedupe_intervals(
-                interval for event, _, _, _ in run for interval in event.evidence
-            )
-            nodes.append(
-                GraphNode(
-                    track_id,
-                    graph.video_id,
-                    "instrument_track",
-                    run[0][1],
-                    evidence,
-                    confidence=confidence,
-                    metadata={
-                        "canonical_label": canonical,
-                        "supporting_event_ids": event_ids,
-                        "detections": [
-                            {
-                                "event_id": event.id,
-                                "confidence": item_confidence,
-                                "basis": basis,
-                            }
-                            for event, _, item_confidence, basis in run
-                        ],
-                        "tracking_scope": "type_presence_not_physical_identity",
-                        "derived": True,
-                        "fact_status": "medical_hypothesis",
-                        "semantic_layer_version": SEMANTIC_LAYER_VERSION,
-                    },
-                )
-            )
-            co_occurring_phases: dict[str, list[EvidenceInterval]] = defaultdict(list)
-            for event, _, item_confidence, basis in run:
-                edges.append(
-                    GraphEdge(
-                        track_id,
-                        event.id,
-                        "visible_during",
-                        list(event.evidence),
-                        item_confidence,
-                        {"basis": basis},
-                    )
-                )
-                phase_id = phase_event_membership.get(event.id)
-                if phase_id:
-                    co_occurring_phases[phase_id].extend(event.evidence)
-            for phase_id, intervals in co_occurring_phases.items():
-                edges.append(
-                    GraphEdge(
-                        track_id,
-                        phase_id,
-                        "co_occurs",
-                        _dedupe_intervals(intervals),
-                        confidence,
-                    )
-                )
+    else:
+        track_count = _append_semantic_instrument_tracks(
+            graph,
+            events,
+            event_position,
+            row_by_event,
+            phase_event_membership,
+            nodes,
+            edges,
+            max_gap=max_instrument_gap_events,
+        )
 
     metadata = dict(graph.metadata)
     metadata.update(
@@ -249,6 +195,7 @@ def augment_with_semantic_hypotheses(
             "semantic_layer_version": SEMANTIC_LAYER_VERSION,
             "semantic_hypotheses_used": True,
             "semantic_nodes_are_observed_facts": False,
+            "instrument_track_source": instrument_track_source,
         }
     )
     semantic_graph = VideoEvidenceGraph(
@@ -269,6 +216,7 @@ def augment_with_semantic_hypotheses(
         "phase_hypothesis_count": len(phase_runs),
         "phase_boundary_count": 2 * len(phase_runs),
         "instrument_track_count": track_count,
+        "instrument_track_source": instrument_track_source,
         "node_type_counts": dict(sorted(node_counts.items())),
         "edge_type_counts": dict(sorted(edge_counts.items())),
         "semantic_nodes_are_observed_facts": False,
@@ -352,6 +300,16 @@ def retrieve_phase_boundary_instruments(
                 "track_id": node.id,
                 "label": node.label,
                 "canonical_label": node.metadata.get("canonical_label"),
+                "canonical_instrument": node.metadata.get(
+                    "canonical_instrument", node.metadata.get("canonical_label")
+                ),
+                "appearance_signature": node.metadata.get("appearance_signature"),
+                "surface_forms": node.metadata.get("surface_forms", []),
+                "tracking_scope": node.metadata.get("tracking_scope"),
+                "physical_identity_confirmed": node.metadata.get(
+                    "physical_identity_confirmed"
+                ),
+                "fact_status": node.metadata.get("fact_status"),
                 "confidence": node.confidence,
                 "supporting_event_ids": [
                     event_id
@@ -405,6 +363,379 @@ def extract_phase_name(question: str) -> str | None:
         if match:
             return match.group(1).strip(" '\"")
     return None
+
+
+def _append_semantic_instrument_tracks(
+    graph: VideoEvidenceGraph,
+    events: Sequence[GraphNode],
+    event_position: dict[str, int],
+    row_by_event: dict[str, dict[str, Any]],
+    phase_event_membership: dict[str, str],
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+    *,
+    max_gap: int,
+) -> int:
+    instrument_detections: dict[
+        str, list[tuple[GraphNode, str, float, str]]
+    ] = defaultdict(list)
+    for event in events:
+        row = row_by_event.get(event.id, {})
+        seen: set[str] = set()
+        for item in _instrument_items(row):
+            label = str(item.get("label", "")).strip()
+            canonical = _canonical_label(label)
+            if canonical in _UNKNOWN_LABELS or canonical in seen:
+                continue
+            seen.add(canonical)
+            instrument_detections[canonical].append(
+                (
+                    event,
+                    label,
+                    _confidence(item.get("confidence")),
+                    str(item.get("basis", "")).strip(),
+                )
+            )
+
+    track_count = 0
+    for canonical, detections in sorted(instrument_detections.items()):
+        runs = _detection_runs(detections, event_position, max_gap=max_gap)
+        for run in runs:
+            track_id = f"instrument_track:{graph.video_id}:{track_count:05d}"
+            track_count += 1
+            event_ids = [item[0].id for item in run]
+            confidence = _mean(item[2] for item in run)
+            evidence = _dedupe_intervals(
+                interval for event, _, _, _ in run for interval in event.evidence
+            )
+            nodes.append(
+                GraphNode(
+                    track_id,
+                    graph.video_id,
+                    "instrument_track",
+                    run[0][1],
+                    evidence,
+                    confidence=confidence,
+                    metadata={
+                        "canonical_label": canonical,
+                        "canonical_instrument": canonical,
+                        "supporting_event_ids": event_ids,
+                        "detections": [
+                            {
+                                "event_id": event.id,
+                                "confidence": item_confidence,
+                                "basis": basis,
+                            }
+                            for event, _, item_confidence, basis in run
+                        ],
+                        "tracking_scope": "type_presence_not_physical_identity",
+                        "physical_identity_confirmed": False,
+                        "derived": True,
+                        "fact_status": "medical_hypothesis",
+                        "semantic_layer_version": SEMANTIC_LAYER_VERSION,
+                    },
+                )
+            )
+            co_occurring_phases: dict[str, list[EvidenceInterval]] = defaultdict(list)
+            for event, _, item_confidence, basis in run:
+                edges.append(
+                    GraphEdge(
+                        track_id,
+                        event.id,
+                        "visible_during",
+                        list(event.evidence),
+                        item_confidence,
+                        {"basis": basis},
+                    )
+                )
+                phase_id = phase_event_membership.get(event.id)
+                if phase_id:
+                    co_occurring_phases[phase_id].extend(event.evidence)
+            for phase_id, intervals in co_occurring_phases.items():
+                edges.append(
+                    GraphEdge(
+                        track_id,
+                        phase_id,
+                        "co_occurs",
+                        _dedupe_intervals(intervals),
+                        confidence,
+                    )
+                )
+    return track_count
+
+
+def _append_appearance_instrument_tracks(
+    graph: VideoEvidenceGraph,
+    events: Sequence[GraphNode],
+    event_position: dict[str, int],
+    phase_event_membership: dict[str, str],
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+    *,
+    max_gap: int,
+) -> int:
+    """Track conservative appearance types without asserting medical identity."""
+    event_by_clip: dict[str, GraphNode] = {}
+    event_by_id = {event.id: event for event in events}
+    for event in events:
+        for clip_id in event.metadata.get("supporting_clip_ids", []):
+            event_by_clip[str(clip_id)] = event
+
+    node_by_id = {node.id: node for node in graph.nodes}
+    roles_by_mention: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.relation not in {"has_subject", "acts_on"}:
+            continue
+        action = node_by_id.get(edge.source)
+        mention = node_by_id.get(edge.target)
+        if not action or action.node_type != "action_event" or not mention:
+            continue
+        role = "subject" if edge.relation == "has_subject" else "target"
+        roles_by_mention[mention.id].add(
+            f"{role}:{_canonical_label(action.label).replace(' ', '_')}"
+        )
+
+    detections_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[GraphNode]] = defaultdict(list)
+    signatures: dict[tuple[str, str], dict[str, Any]] = {}
+    for mention in graph.nodes:
+        if mention.node_type != "entity_mention":
+            continue
+        if mention.metadata.get("category") != "instrument":
+            continue
+        if mention.metadata.get("source_field") != "visible_instruments":
+            continue
+        clip_id = str(mention.metadata.get("clip_id", ""))
+        event = event_by_clip.get(clip_id)
+        if event is None:
+            continue
+        signature = _appearance_signature(mention)
+        base_key = _appearance_signature_key(signature)
+        if signature["canonical_family"] == "generic_instrument" and not any(
+            signature[field] for field in ("colors", "shapes", "markings")
+        ):
+            base_key = f"{base_key}|event:{event.id}"
+        group_key = (event.id, base_key)
+        grouped[group_key].append(mention)
+        signatures[group_key] = signature
+
+    for (event_id, key), mentions in grouped.items():
+        event = event_by_id[event_id]
+        roles = sorted(
+            {role for mention in mentions for role in roles_by_mention[mention.id]}
+        )
+        detections_by_key[key].append(
+            {
+                "event": event,
+                "mentions": mentions,
+                "signature": signatures[(event_id, key)],
+                "surface_forms": sorted({item.label for item in mentions}),
+                "action_roles": roles,
+            }
+        )
+
+    track_count = 0
+    for key, detections in sorted(detections_by_key.items()):
+        ordered = sorted(detections, key=lambda item: event_position[item["event"].id])
+        runs: list[list[dict[str, Any]]] = []
+        current: list[dict[str, Any]] = []
+        previous_position: int | None = None
+        for detection in ordered:
+            position = event_position[detection["event"].id]
+            if (
+                previous_position is not None
+                and position - previous_position > max_gap + 1
+            ):
+                runs.append(current)
+                current = []
+            current.append(detection)
+            previous_position = position
+        if current:
+            runs.append(current)
+
+        for run in runs:
+            track_id = f"instrument_track:{graph.video_id}:{track_count:05d}"
+            track_count += 1
+            source_mentions = [
+                mention for detection in run for mention in detection["mentions"]
+            ]
+            event_ids = [detection["event"].id for detection in run]
+            surface_forms = sorted({item.label for item in source_mentions})
+            signature = _merge_appearance_signatures(
+                detection["signature"] for detection in run
+            )
+            confidence = min(0.5 + 0.1 * (len(event_ids) - 1), 0.85)
+            evidence = _dedupe_intervals(
+                interval for mention in source_mentions for interval in mention.evidence
+            )
+            nodes.append(
+                GraphNode(
+                    track_id,
+                    graph.video_id,
+                    "instrument_track",
+                    _appearance_track_label(signature, surface_forms),
+                    evidence,
+                    confidence=confidence,
+                    metadata={
+                        "canonical_label": signature["canonical_family"],
+                        "canonical_instrument": "unknown",
+                        "semantic_candidates": [],
+                        "appearance_signature": signature,
+                        "supporting_event_ids": event_ids,
+                        "source_mention_ids": [item.id for item in source_mentions],
+                        "surface_forms": surface_forms,
+                        "detections": [
+                            {
+                                "event_id": detection["event"].id,
+                                "mention_ids": [
+                                    item.id for item in detection["mentions"]
+                                ],
+                                "surface_forms": detection["surface_forms"],
+                                "action_roles": detection["action_roles"],
+                            }
+                            for detection in run
+                        ],
+                        "tracking_scope": (
+                            "appearance_type_presence_not_physical_identity"
+                        ),
+                        "physical_identity_confirmed": False,
+                        "derived": True,
+                        "fact_status": "derived_observation_track",
+                        "appearance_track_version": APPEARANCE_TRACK_VERSION,
+                        "semantic_layer_version": SEMANTIC_LAYER_VERSION,
+                    },
+                )
+            )
+            co_occurring_phases: dict[str, list[EvidenceInterval]] = defaultdict(list)
+            for detection in run:
+                event = detection["event"]
+                event_mentions = detection["mentions"]
+                event_evidence = _dedupe_intervals(
+                    interval
+                    for mention in event_mentions
+                    for interval in mention.evidence
+                )
+                edges.append(
+                    GraphEdge(
+                        track_id,
+                        event.id,
+                        "visible_during",
+                        event_evidence,
+                        confidence,
+                        {
+                            "mention_ids": [item.id for item in event_mentions],
+                            "action_roles": detection["action_roles"],
+                        },
+                    )
+                )
+                for mention in event_mentions:
+                    edges.append(
+                        GraphEdge(
+                            track_id,
+                            mention.id,
+                            "derived_from",
+                            list(mention.evidence),
+                            confidence,
+                            {"derivation": "appearance_signature_grouping"},
+                        )
+                    )
+                phase_id = phase_event_membership.get(event.id)
+                if phase_id:
+                    co_occurring_phases[phase_id].extend(event_evidence)
+            for phase_id, intervals in co_occurring_phases.items():
+                edges.append(
+                    GraphEdge(
+                        track_id,
+                        phase_id,
+                        "co_occurs",
+                        _dedupe_intervals(intervals),
+                        confidence,
+                    )
+                )
+    return track_count
+
+
+def _appearance_signature(mention: GraphNode) -> dict[str, Any]:
+    attributes = mention.metadata.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    canonical = str(mention.metadata.get("canonical", "generic_instrument"))
+    canonical = _canonical_label(canonical).replace(" ", "_") or "generic_instrument"
+    signature: dict[str, Any] = {"canonical_family": canonical}
+    for field, output in (
+        ("color", "colors"),
+        ("shape", "shapes"),
+        ("material", "materials"),
+        ("appearance", "appearance"),
+        ("size", "sizes"),
+    ):
+        value = attributes.get(field, [])
+        values = value if isinstance(value, list) else [value]
+        signature[output] = sorted(
+            {
+                _canonical_label(str(item)).replace(" ", "_")
+                for item in values
+                if _canonical_label(str(item)) not in _UNKNOWN_LABELS
+            }
+        )
+    signature["markings"] = _extract_visible_markings(mention.label)
+    return signature
+
+
+def _appearance_signature_key(signature: dict[str, Any]) -> str:
+    family = str(signature["canonical_family"])
+    fields = [family]
+    names = ("markings",)
+    if family == "generic_instrument":
+        names = ("colors", "shapes", "markings")
+    for name in names:
+        fields.append(f"{name}:{','.join(signature[name])}")
+    return "|".join(fields)
+
+
+def _merge_appearance_signatures(
+    signatures: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    items = list(signatures)
+    result: dict[str, Any] = {"canonical_family": items[0]["canonical_family"]}
+    for name in ("colors", "shapes", "materials", "appearance", "sizes", "markings"):
+        result[name] = sorted({value for item in items for value in item[name]})
+    return result
+
+
+def _extract_visible_markings(label: str) -> list[str]:
+    values = re.findall(r"['\"]([^'\"]{1,40})['\"]", str(label))
+    values.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"(?:marked|labeled|engraved)\s+(?:with\s+)?([a-z0-9][a-z0-9 -]{0,39})",
+            str(label),
+            re.IGNORECASE,
+        )
+    )
+    return sorted(
+        {
+            _canonical_label(value).replace(" ", "_")
+            for value in values
+            if _canonical_label(value) not in _UNKNOWN_LABELS
+        }
+    )
+
+
+def _appearance_track_label(
+    signature: dict[str, Any], surface_forms: Sequence[str]
+) -> str:
+    family = str(signature["canonical_family"]).replace("_", " ")
+    descriptors = [
+        *signature["colors"],
+        *signature["shapes"],
+        *[f'marked {item}' for item in signature["markings"]],
+    ]
+    if descriptors:
+        return f"{family} ({', '.join(item.replace('_', ' ') for item in descriptors)})"
+    if surface_forms:
+        return min(surface_forms, key=lambda item: (len(item), item.lower()))
+    return family
 
 
 def build_video_semantic_ontology(

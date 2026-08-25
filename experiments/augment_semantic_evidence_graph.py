@@ -23,6 +23,15 @@ def main() -> None:
     parser.add_argument("--hypotheses", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--max-instrument-gap-events", type=int, default=1)
+    parser.add_argument(
+        "--instrument-track-source",
+        choices=("semantic_hypotheses", "appearance_mentions"),
+        default="semantic_hypotheses",
+        help=(
+            "Build tracks from inferred instrument labels or from observation-first "
+            "visible-instrument mentions."
+        ),
+    )
     args = parser.parse_args()
 
     graph = load_evidence_graph(args.graph)
@@ -31,6 +40,7 @@ def main() -> None:
         graph,
         hypotheses,
         max_instrument_gap_events=args.max_instrument_gap_events,
+        instrument_track_source=args.instrument_track_source,
     )
     write_semantic_layer_artifacts(artifacts, args.output_dir)
     report = artifacts.report
@@ -38,7 +48,8 @@ def main() -> None:
         f"Built {report['schema_version']} for {report['video_id']}: "
         f"{report['phase_hypothesis_count']} phases, "
         f"{report['phase_boundary_count']} boundaries, "
-        f"{report['instrument_track_count']} instrument tracks -> "
+        f"{report['instrument_track_count']} "
+        f"{report['instrument_track_source']} instrument tracks -> "
         f"{args.output_dir}"
     )
 
