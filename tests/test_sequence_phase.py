@@ -162,9 +162,7 @@ def test_named_phase_is_not_outvoted_by_unknown_within_coarse_event() -> None:
             },
         ]
     }
-    segments = normalize_sequence_phase_response(
-        payload, compact, ["Preparation"]
-    )
+    segments = normalize_sequence_phase_response(payload, compact, ["Preparation"])
     rows = project_sequence_phases_to_events(_graph(), segments, source="test-model")
     assert rows[0]["phase_hypothesis"] == {
         "label": "Preparation",
