@@ -224,6 +224,24 @@ python experiments/evaluate_phase_instrument_graph.py \
 
 检索路径为 `phase_hypothesis -> phase_boundary -> onset event <- instrument_track`，并默认附带一个紧邻 event 作为粗粒度 64 秒切片的边界上下文。语义节点均标记为医学假设，不会被序列化成直接观察事实。
 
+### 序列级阶段推断（v3.1 pilot）
+
+逐 event 的局部语义推断之外，v3.1 增加一个独立的全序列阶段中间层。它一次读取同一视频全部按时间排序的 observation-first 描述，只保留 summary、可见器械/物体、动作和状态变化，不读取 `medical_inferences`，也不重新输入视觉帧。模型输出覆盖完整 clip 序列的连续阶段区间；程序严格校验区间有序、无重叠、无缺口，并将区间投影为与现有 temporal event 对齐的 `event_phase_hypotheses.jsonl`。
+
+```bash
+python experiments/infer_sequence_phase_hypotheses.py \
+  --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --annotations medhorizon_test.jsonl \
+  --video-key <video> \
+  --model qwen3-vl-235b-a22b-instruct \
+  --base-url https://api.agicto.cn/v1 \
+  --api-key-env AGICTO_API_KEY \
+  --output-dir artifacts/graph_rag/<video>/<sequence_phase_run>
+```
+
+输出包括 `sequence_phase_segments.json`、`event_phase_hypotheses.jsonl`、`raw_response.json` 和 `run_metadata.json`。该层只生成 `phase_hypothesis`，器械轨迹仍由独立的视觉/语义证据产生。当前阶段候选来自该视频公开问题的候选项但不读取答案，因此结果标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。
+
 ## 时间证据恢复
 
 公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。

@@ -40,6 +40,12 @@ graph:
     instrument_tracking_scope: type_presence_not_physical_identity
     candidate_ontology: diagnostic_only
     answers_used: false
+    sequence_phase_inference:
+      version: observation-sequence-phase-v1
+      input: complete_ordered_observation_descriptions
+      request_scope: full_video_text_sequence
+      uses_visual_frames: false
+      output: phase_segments_and_event_projection
 retrieval:
   strategy: deterministic_event_graph_v1
   initial_candidates: 20
