@@ -161,6 +161,7 @@ def test_two_stage_prompts_separate_activity_from_phase_candidates() -> None:
     compact = compact_observation_sequence(_rows())
     activity_prompt = build_open_activity_segmentation_prompt(compact)
     assert "Candidate phases" not in activity_prompt
+    assert "activity_segments MUST NOT be empty" in activity_prompt
     activities = normalize_open_activity_response(_activity_payload(), compact)
     mapping_prompt = build_strict_phase_mapping_prompt(
         activities, ["Preparation", "Perfusion Needle Spacer Suturing"]

@@ -82,7 +82,8 @@ def build_open_activity_segmentation_prompt(
         '"observed_pattern":"visible evidence recurring in the segment",'
         '"boundary_reason":"visible change from the previous segment or video start"}]}'
         "\n\nRules:\n"
-        "1. Cover every supplied clip exactly once, in order, with contiguous and "
+        "1. activity_segments MUST NOT be empty. Cover every supplied clip exactly "
+        "once, in order, with contiguous and "
         "non-overlapping segments.\n"
         "2. Boundaries may occur only between supplied clips and require a visible "
         "change in activity, tool/object pattern, or scene state.\n"
@@ -91,6 +92,9 @@ def build_open_activity_segmentation_prompt(
         "4. Do not split merely because a clip boundary exists; preserve long-running "
         "activity when the visible pattern remains compatible.\n"
         "5. basis_clip_ids must contain 1-5 supplied clip IDs inside that segment.\n\n"
+        "If no reliable internal boundary is visible, return one segment from the "
+        "first clip through the last clip. A literal label such as 'repeated tool and "
+        "thread-like material manipulation' is valid; an empty list is invalid.\n\n"
         "Ordered observations:\n"
         + json.dumps(list(observations), ensure_ascii=False, separators=(",", ":"))
     )
