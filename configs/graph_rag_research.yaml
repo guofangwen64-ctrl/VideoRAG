@@ -41,9 +41,9 @@ graph:
     candidate_ontology: diagnostic_only
     answers_used: false
     sequence_phase_inference:
-      version: observation-sequence-phase-v1
+      version: observation-sequence-phase-two-stage-v1
       input: complete_ordered_observation_descriptions
-      request_scope: full_video_text_sequence
+      stages: [open_activity_segmentation, strict_phase_mapping]
       uses_visual_frames: false
       output: phase_segments_and_event_projection
 retrieval:

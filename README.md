@@ -242,6 +242,20 @@ python experiments/infer_sequence_phase_hypotheses.py \
 
 输出包括 `sequence_phase_segments.json`、`event_phase_hypotheses.jsonl`、`raw_response.json` 和 `run_metadata.json`。该层只生成 `phase_hypothesis`，器械轨迹仍由独立的视觉/语义证据产生。当前阶段候选来自该视频公开问题的候选项但不读取答案，因此结果标记为 `candidate_aware_diagnostic`，不能作为 question-independent 正式 benchmark。
 
+为降低“看到通用缝合动作就套用最近阶段名”的候选偏置，推荐使用两级协议。第一阶段在完全不提供 phase ontology 的情况下生成开放式可见活动段；第二阶段才将活动段映射到候选阶段。通用穿线、拉线、收紧、红色液体或器械接触组织不能单独支持某个具体缝合阶段；映射缺少区分性 cue、置信度为 low，或模型决定为 `insufficient` 时，程序会确定性降级为 `unknown`。
+
+```bash
+python experiments/infer_two_stage_sequence_phases.py \
+  --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \
+  --graph artifacts/graph_rag/<video>/evidence_graph_v2_1/evidence_graph.json \
+  --annotations medhorizon_test.jsonl \
+  --video-key <video> \
+  --api-key-env AGICTO_API_KEY \
+  --output-dir artifacts/graph_rag/<video>/<two_stage_run>
+```
+
+两级输出额外包含 `open_activity_segments.json`、两次原始响应和逐阶段请求 metadata；若第二次请求失败，可使用 `--resume` 复用已完成的第一阶段。
+
 ## 时间证据恢复
 
 公开 QA 标注不含独立的证据起止时间字段。恢复脚本仅将题干中直接出现的区间或时间点标为高置信证据；同视频内通过阶段识别题匹配得到的窗口标为 `phase_anchor`（弱锚点），不能作为严格的检索 GT。

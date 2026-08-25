@@ -4,9 +4,13 @@ from medhorizon_videorag.graph_rag import (
     EvidenceInterval,
     GraphNode,
     VideoEvidenceGraph,
+    build_open_activity_segmentation_prompt,
     build_sequence_phase_prompt,
+    build_strict_phase_mapping_prompt,
     compact_observation_sequence,
+    normalize_open_activity_response,
     normalize_sequence_phase_response,
+    normalize_strict_phase_mapping_response,
     project_sequence_phases_to_events,
 )
 
@@ -126,3 +130,76 @@ def test_project_sequence_phases_to_temporal_events() -> None:
     assert rows[0]["phase_hypothesis"]["label"] == "Preparation"
     assert rows[1]["phase_hypothesis"]["label"] == "Left Atrium Suturing"
     assert rows[0]["instrument_hypotheses"] == []
+
+
+def _activity_payload() -> dict:
+    return {
+        "activity_segments": [
+            {
+                "activity_label": "tool and thread manipulation",
+                "start_clip_id": "case_vgent_00000",
+                "end_clip_id": "case_vgent_00001",
+                "confidence": "high",
+                "basis_clip_ids": ["case_vgent_00000"],
+                "observed_pattern": "a tool repeatedly pulls thread-like material",
+                "boundary_reason": "video start",
+            },
+            {
+                "activity_label": "mesh placement and thread tightening",
+                "start_clip_id": "case_vgent_00002",
+                "end_clip_id": "case_vgent_00003",
+                "confidence": "medium",
+                "basis_clip_ids": ["case_vgent_00002"],
+                "observed_pattern": "thread is tightened around a mesh-like object",
+                "boundary_reason": "a mesh-like object becomes visible",
+            },
+        ]
+    }
+
+
+def test_two_stage_prompts_separate_activity_from_phase_candidates() -> None:
+    compact = compact_observation_sequence(_rows())
+    activity_prompt = build_open_activity_segmentation_prompt(compact)
+    assert "Candidate phases" not in activity_prompt
+    activities = normalize_open_activity_response(_activity_payload(), compact)
+    mapping_prompt = build_strict_phase_mapping_prompt(
+        activities, ["Preparation", "Perfusion Needle Spacer Suturing"]
+    )
+    assert "Generic suturing cues are insufficient" in mapping_prompt
+    assert "Perfusion Needle Spacer Suturing" in mapping_prompt
+
+
+def test_strict_mapping_rejects_generic_or_low_confidence_labels() -> None:
+    compact = compact_observation_sequence(_rows())
+    activities = normalize_open_activity_response(_activity_payload(), compact)
+    payload = {
+        "phase_mappings": [
+            {
+                "segment_id": "open_activity:00000",
+                "label": "Preparation",
+                "decision": "supported",
+                "confidence": "medium",
+                "distinctive_cues": [],
+                "missing_evidence": ["no distinctive setup cue"],
+                "basis": "generic manipulation only",
+            },
+            {
+                "segment_id": "open_activity:00001",
+                "label": "Perfusion Needle Spacer Suturing",
+                "decision": "supported",
+                "confidence": "high",
+                "distinctive_cues": ["mesh-like object secured with thread"],
+                "missing_evidence": [],
+                "basis": "mesh-like object distinguishes this activity",
+            },
+        ]
+    }
+    segments = normalize_strict_phase_mapping_response(
+        payload,
+        activities,
+        ["Preparation", "Perfusion Needle Spacer Suturing"],
+    )
+    assert segments[0]["label"] == "unknown"
+    assert segments[0]["mapping_accepted"] is False
+    assert segments[1]["label"] == "Perfusion Needle Spacer Suturing"
+    assert segments[1]["mapping_accepted"] is True

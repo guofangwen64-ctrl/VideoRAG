@@ -63,10 +63,15 @@ from .semantic_layer import (
 )
 from .sequence_phase import (
     SEQUENCE_PHASE_VERSION,
+    TWO_STAGE_SEQUENCE_PHASE_VERSION,
+    build_open_activity_segmentation_prompt,
     build_sequence_phase_prompt,
+    build_strict_phase_mapping_prompt,
     compact_observation_sequence,
     load_observation_sequence,
+    normalize_open_activity_response,
     normalize_sequence_phase_response,
+    normalize_strict_phase_mapping_response,
     project_sequence_phases_to_events,
 )
 
@@ -82,6 +87,7 @@ __all__ = [
     "SEMANTIC_GRAPH_SCHEMA_VERSION",
     "SEMANTIC_LAYER_VERSION",
     "SEQUENCE_PHASE_VERSION",
+    "TWO_STAGE_SEQUENCE_PHASE_VERSION",
     "DeterministicEventGraphRetriever",
     "EvidenceGraphArtifacts",
     "EvidenceInterval",
@@ -104,7 +110,9 @@ __all__ = [
     "augment_with_semantic_hypotheses",
     "build_event_observation_catalog",
     "build_evidence_graph",
+    "build_open_activity_segmentation_prompt",
     "build_sequence_phase_prompt",
+    "build_strict_phase_mapping_prompt",
     "build_video_semantic_ontology",
     "compact_observation_sequence",
     "extract_phase_name",
@@ -118,7 +126,9 @@ __all__ = [
     "normalize_description_rows",
     "normalize_entity",
     "normalize_graph_query",
+    "normalize_open_activity_response",
     "normalize_sequence_phase_response",
+    "normalize_strict_phase_mapping_response",
     "project_sequence_phases_to_events",
     "retrieve_phase_boundary_instruments",
     "select_event_frame_groups",
