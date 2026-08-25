@@ -56,8 +56,7 @@ def augment_with_semantic_hypotheses(
         "appearance_mentions",
     }:
         raise ValueError(
-            "instrument_track_source must be semantic_hypotheses or "
-            "appearance_mentions"
+            "instrument_track_source must be semantic_hypotheses or appearance_mentions"
         )
     if any(
         node.node_type in {"phase_hypothesis", "phase_boundary", "instrument_track"}
@@ -376,9 +375,9 @@ def _append_semantic_instrument_tracks(
     *,
     max_gap: int,
 ) -> int:
-    instrument_detections: dict[
-        str, list[tuple[GraphNode, str, float, str]]
-    ] = defaultdict(list)
+    instrument_detections: dict[str, list[tuple[GraphNode, str, float, str]]] = (
+        defaultdict(list)
+    )
     for event in events:
         row = row_by_event.get(event.id, {})
         seen: set[str] = set()
@@ -729,7 +728,7 @@ def _appearance_track_label(
     descriptors = [
         *signature["colors"],
         *signature["shapes"],
-        *[f'marked {item}' for item in signature["markings"]],
+        *[f"marked {item}" for item in signature["markings"]],
     ]
     if descriptors:
         return f"{family} ({', '.join(item.replace('_', ' ') for item in descriptors)})"
