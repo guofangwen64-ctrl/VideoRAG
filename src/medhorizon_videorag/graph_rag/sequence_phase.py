@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .schemas import GraphNode, VideoEvidenceGraph
 
@@ -193,7 +194,7 @@ def project_sequence_phases_to_events(
             segment_ids: list[str] = []
         else:
             votes = Counter(str(item["label"]) for item in matched)
-            label = sorted(votes, key=lambda value: (-votes[value], value))[0]
+            label = min(votes, key=lambda value: (-votes[value], value))
             winning = [item for item in matched if item["label"] == label]
             confidence = min(
                 (str(item["confidence"]) for item in winning),

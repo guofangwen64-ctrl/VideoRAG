@@ -50,14 +50,6 @@ from .schemas import (
     MedicalGraphQAExample,
     VideoEvidenceGraph,
 )
-from .sequence_phase import (
-    SEQUENCE_PHASE_VERSION,
-    build_sequence_phase_prompt,
-    compact_observation_sequence,
-    load_observation_sequence,
-    normalize_sequence_phase_response,
-    project_sequence_phases_to_events,
-)
 from .semantic_layer import (
     SEMANTIC_GRAPH_SCHEMA_VERSION,
     SEMANTIC_LAYER_VERSION,
@@ -68,6 +60,14 @@ from .semantic_layer import (
     load_semantic_hypotheses,
     retrieve_phase_boundary_instruments,
     write_semantic_layer_artifacts,
+)
+from .sequence_phase import (
+    SEQUENCE_PHASE_VERSION,
+    build_sequence_phase_prompt,
+    compact_observation_sequence,
+    load_observation_sequence,
+    normalize_sequence_phase_response,
+    project_sequence_phases_to_events,
 )
 
 __all__ = [
@@ -103,15 +103,15 @@ __all__ = [
     "VideoEvidenceGraph",
     "augment_with_semantic_hypotheses",
     "build_event_observation_catalog",
-    "build_sequence_phase_prompt",
     "build_evidence_graph",
+    "build_sequence_phase_prompt",
     "build_video_semantic_ontology",
     "compact_observation_sequence",
     "extract_phase_name",
     "load_description_rows",
     "load_evidence_graph",
-    "load_observation_sequence",
     "load_manifest_frame_paths",
+    "load_observation_sequence",
     "load_semantic_hypotheses",
     "merge_temporal_events",
     "normalize_action",
