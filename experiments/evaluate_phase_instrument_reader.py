@@ -64,7 +64,9 @@ def main() -> None:
         if item.task_name != "Phase-Instrument Association"
     ]
     if invalid_tasks:
-        raise ValueError(f"Requested QA IDs are not Phase-Instrument tasks: {invalid_tasks}")
+        raise ValueError(
+            f"Requested QA IDs are not Phase-Instrument tasks: {invalid_tasks}"
+        )
 
     graph = load_evidence_graph(args.graph)
     if graph.video_id != args.video_key:
@@ -102,7 +104,9 @@ def main() -> None:
         started = time.monotonic()
         phase = extract_phase_name(item.question)
         if not phase:
-            raise ValueError(f"Cannot extract phase from QA {item.uid}: {item.question}")
+            raise ValueError(
+                f"Cannot extract phase from QA {item.uid}: {item.question}"
+            )
         try:
             reader_input = build_phase_instrument_reader_input(
                 graph,
@@ -178,9 +182,7 @@ def main() -> None:
     report: dict[str, Any] = {
         "requested": len(rows),
         "completed": len(completed),
-        "unresolved_graph": sum(
-            row["status"] == "unresolved_graph" for row in rows
-        ),
+        "unresolved_graph": sum(row["status"] == "unresolved_graph" for row in rows),
         "reader_failed": sum(row["status"] == "reader_failed" for row in rows),
         "correct": sum(bool(row["correct"]) for row in completed),
         "accuracy_all_requested": (
@@ -191,9 +193,7 @@ def main() -> None:
             if completed
             else None
         ),
-        "prediction_counts": dict(
-            Counter(str(row["prediction"]) for row in completed)
-        ),
+        "prediction_counts": dict(Counter(str(row["prediction"]) for row in completed)),
         "instrument_identity_annotations_used": False,
         "answers_used_for_retrieval_or_reader": False,
         "candidate_aware_phase_graph": True,

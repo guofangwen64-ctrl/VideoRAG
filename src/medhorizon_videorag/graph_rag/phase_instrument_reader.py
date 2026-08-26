@@ -106,9 +106,7 @@ def build_phase_instrument_reader_input(
                     "selected_event_support": selected_support,
                 },
                 "fact_status": item.get("fact_status"),
-                "physical_identity_confirmed": item.get(
-                    "physical_identity_confirmed"
-                ),
+                "physical_identity_confirmed": item.get("physical_identity_confirmed"),
             }
         )
 
