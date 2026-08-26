@@ -35,6 +35,10 @@ from .qa_experiment import (
     select_event_frame_groups,
     strip_explicit_time_range,
 )
+from .phase_instrument_reader import (
+    PHASE_INSTRUMENT_READER_VERSION,
+    build_phase_instrument_reader_input,
+)
 from .retrieval import (
     RETRIEVER_VERSION,
     DeterministicEventGraphRetriever,
@@ -106,6 +110,7 @@ __all__ = [
     "NormalizedGraphQuery",
     "NormalizedMention",
     "OpenAICompatibleGraphQA",
+    "PHASE_INSTRUMENT_READER_VERSION",
     "SemanticLayerArtifacts",
     "TemporalEvent",
     "VideoEvidenceGraph",
@@ -113,6 +118,7 @@ __all__ = [
     "build_event_observation_catalog",
     "build_evidence_graph",
     "build_open_activity_segmentation_prompt",
+    "build_phase_instrument_reader_input",
     "build_sequence_phase_prompt",
     "build_strict_phase_mapping_prompt",
     "build_video_semantic_ontology",

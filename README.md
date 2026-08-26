@@ -227,6 +227,22 @@ python experiments/evaluate_phase_instrument_graph.py \
 
 检索路径为 `phase_hypothesis -> phase_boundary -> onset event <- instrument_track`，并默认附带一个紧邻 event 作为粗粒度 64 秒切片的边界上下文。阶段和边界节点标记为医学假设；外观轨迹标记为 `derived_observation_track`，保存颜色、形状、材质、可见标记、动作角色、原始 mention 和代表证据。其 `canonical_instrument` 固定为 `unknown`、`physical_identity_confirmed` 固定为 `false`：它只把相邻事件中的相同外观类型连接起来，不宣称已经识别出 Needle Holder 等精确器械，也不宣称是同一物理实例。最终由 Reader 结合候选项与代表帧完成器械判断。
 
+### Phase-Instrument 外观轨迹 Reader
+
+`evaluate_phase_instrument_reader.py` 实现阶段边界到最终多选答案的完整诊断链。图检索阶段不读取 QA 选项或答案，只根据阶段起点、轨迹结构支持、外观具体程度、动作角色和可读帧选择候选；随后 VLM Reader 同时查看外观轨迹目录、对应 observation 帧和题目选项，返回选项及实际采用的 track ID。没有可靠阶段节点时记录为 `unresolved_graph`，不强制猜测。
+
+```bash
+OPENAI_API_KEY=EMPTY python experiments/evaluate_phase_instrument_reader.py \
+  --annotations medhorizon_test.jsonl \
+  --graph artifacts/graph_rag/<video>/<run>/combined_semantic_graph/semantic_evidence_graph.json \
+  --video-key <video> --qa-uids 2,3,4,5 \
+  --model Qwen/Qwen2.5-VL-7B-Instruct \
+  --base-url http://127.0.0.1:8002/v1 \
+  --output-dir artifacts/graph_rag/<video>/<run>/phase_instrument_reader
+```
+
+输出的 `reader_input` 会保留候选轨迹排序分解、阶段边界、事件、clip、帧路径和 reasoning path，便于区分阶段覆盖失败、轨迹召回失败与 Reader 识别失败。器械答案只用于预测完成后的准确率计算，不参与检索、候选排序或 Reader prompt。
+
 ### 序列级阶段推断（v3.1 pilot）
 
 逐 event 的局部语义推断之外，v3.1 增加一个独立的全序列阶段中间层。它一次读取同一视频全部按时间排序的 observation-first 描述，只保留 summary、可见器械/物体、动作和状态变化，不读取 `medical_inferences`，也不重新输入视觉帧。模型输出覆盖完整 clip 序列的连续阶段区间；程序严格校验区间有序、无重叠、无缺口，并将区间投影为与现有 temporal event 对齐的 `event_phase_hypotheses.jsonl`。

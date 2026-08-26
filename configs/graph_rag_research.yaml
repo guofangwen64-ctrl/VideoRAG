@@ -60,6 +60,14 @@ retrieval:
   event_structural_support_weight: 0.10
   query_aware_representative_reranking: true
   visual_fallback: true
+  phase_instrument_reader:
+    version: phase-instrument-track-reader-v1
+    context_events: 1
+    max_tracks: 6
+    max_evidence_clips: 4
+    frames_per_clip: 8
+    instrument_identity_annotations_used: false
+    qa_options_used_only_by_reader: true
 llm:
   provider: not_configured
   model: not_configured

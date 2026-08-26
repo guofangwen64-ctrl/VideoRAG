@@ -7,6 +7,7 @@ from medhorizon_videorag.graph_rag import (
     GraphNode,
     VideoEvidenceGraph,
     augment_with_semantic_hypotheses,
+    build_phase_instrument_reader_input,
     build_video_semantic_ontology,
     extract_phase_name,
     retrieve_phase_boundary_instruments,
@@ -229,6 +230,25 @@ def test_appearance_tracks_keep_medical_identity_unknown(tmp_path: Path) -> None
     )
     assert retrieved["canonical_instrument"] == "unknown"
     assert retrieved["physical_identity_confirmed"] is False
+
+    reader_input = build_phase_instrument_reader_input(
+        artifacts.graph,
+        "Left Atrium Suturing",
+        max_tracks=3,
+        max_evidence_clips=2,
+        frames_per_clip=1,
+    )
+    assert reader_input["candidate_tracks"][0]["appearance_family"] == (
+        "needle_like_instrument"
+    )
+    assert reader_input["candidate_tracks"][0]["canonical_instrument"] == "unknown"
+    assert reader_input["qa_options_used_for_retrieval"] is False
+    assert reader_input["answers_used_for_retrieval"] is False
+    assert reader_input["evidence_groups"][0]["reader_frame_paths"]
+    assert all(
+        track["physical_identity_confirmed"] is False
+        for track in reader_input["candidate_tracks"]
+    )
 
 
 def test_semantic_layer_rejects_unknown_track_source(tmp_path: Path) -> None:

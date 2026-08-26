@@ -287,6 +287,88 @@ class OpenAICompatibleGraphQA:
             )
         return choice, str(payload.get("rationale", ""))
 
+    def answer_phase_instrument(
+        self,
+        question: str,
+        choices: Sequence[str],
+        reader_input: dict[str, Any],
+    ) -> tuple[str, str, list[str]]:
+        """Rerank unknown-identity appearance tracks with their grounded frames."""
+        labels = _choice_labels(choices)
+        candidates = list(reader_input.get("candidate_tracks", []))
+        known_track_ids = {str(item["track_id"]) for item in candidates}
+        if not candidates:
+            raise ValueError("Phase-instrument Reader requires candidate tracks")
+        catalog = [
+            {
+                "track_id": item["track_id"],
+                "graph_rank": item["graph_rank"],
+                "observation_label": item["label"],
+                "appearance_family": item["appearance_family"],
+                "appearance_signature": item["appearance_signature"],
+                "surface_forms": item["surface_forms"],
+                "action_roles": item["action_roles"],
+                "evidence_clip_ids": item["reader_clip_ids"],
+                "canonical_instrument": "unknown",
+            }
+            for item in candidates
+        ]
+        prompt = (
+            "You are answering which instrument is visible at the onset of a surgical "
+            "phase. The graph retrieved observation-level appearance tracks and frames "
+            "near the phase boundary. Track labels are not medical instrument "
+            "identifications, and tracks do not assert the same physical object over "
+            "time. Independently compare the visual shape, jaws, shaft, tip, markings, "
+            "and interaction pattern against every answer option. Do not choose an "
+            "option merely because its wording resembles an observation label. "
+            "Graph rank is only a retrieval prior. Return only JSON with keys choice, "
+            "selected_track_ids, and rationale. choice must be one of "
+            f"{labels}; selected_track_ids must come from the catalog.\n"
+            f"Target phase: {reader_input['phase_label']}\n"
+            f"Question: {question}\nChoices:\n"
+            + "\n".join(choices)
+            + "\nAppearance-track catalog:\n"
+            + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+        )
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for number, group in enumerate(reader_input["evidence_groups"], start=1):
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"Evidence clip {number}: {group['clip_id']}; "
+                        f"tracks={group['track_ids']}"
+                    ),
+                }
+            )
+            for frame_path in group["reader_frame_paths"]:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,"
+                            + _encode_resized_jpeg(frame_path, self.max_image_pixels)
+                        },
+                    }
+                )
+        payload = self._vision_json(content, max_tokens=384)
+        choice = str(payload.get("choice", "")).strip().upper()
+        if choice not in labels:
+            raise RuntimeError(
+                f"Reader returned invalid choice {choice!r}; expected one of {labels}"
+            )
+        raw_track_ids = payload.get("selected_track_ids", [])
+        if isinstance(raw_track_ids, str):
+            raw_track_ids = [raw_track_ids]
+        if not isinstance(raw_track_ids, list):
+            raw_track_ids = []
+        selected_track_ids = []
+        for track_id in raw_track_ids:
+            value = str(track_id)
+            if value in known_track_ids and value not in selected_track_ids:
+                selected_track_ids.append(value)
+        return choice, str(payload.get("rationale", "")), selected_track_ids
+
     def _text_response(self, prompt: str, *, max_tokens: int) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
