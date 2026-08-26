@@ -38,7 +38,7 @@ def build_phase_instrument_reader_input(
     )
     node_by_id = {node.id: node for node in graph.nodes}
     clips = {
-        str(node.metadata.get("clip_id")): node
+        _segment_clip_id(node): node
         for node in graph.nodes
         if node.node_type == "segment"
     }
@@ -229,3 +229,12 @@ def _uniform_sample(items: Sequence[str], count: int) -> list[str]:
         round(index * (len(items) - 1) / (count - 1)) for index in range(count)
     ]
     return [str(items[position]) for position in positions]
+
+
+def _segment_clip_id(node: GraphNode) -> str:
+    clip_id = str(node.metadata.get("clip_id", ""))
+    if not clip_id and node.evidence:
+        clip_id = str(node.evidence[0].metadata.get("clip_id", ""))
+    if not clip_id and node.id.startswith("clip:"):
+        clip_id = node.id.removeprefix("clip:")
+    return clip_id
