@@ -127,6 +127,8 @@ def build_phase_instrument_reader_input(
             if clip_id in groups_by_clip:
                 groups_by_clip[clip_id]["track_ids"].append(candidate["track_id"])
                 continue
+            if len(groups_by_clip) >= max_evidence_clips:
+                continue
             clip = clips[clip_id]
             source_frames = [
                 path for path in clip.evidence[0].frame_paths if Path(path).is_file()
@@ -143,10 +145,6 @@ def build_phase_instrument_reader_input(
                 ),
                 "selection": "appearance_track_grounded_clip",
             }
-            if len(groups_by_clip) >= max_evidence_clips:
-                break
-        if len(groups_by_clip) >= max_evidence_clips:
-            break
 
     evidence_groups = list(groups_by_clip.values())
     included_tracks = {
