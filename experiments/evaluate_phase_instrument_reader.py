@@ -25,6 +25,7 @@ from medhorizon_videorag.graph_rag import (
     extract_phase_name,
     load_evidence_graph,
     load_open_activity_segments,
+    rank_open_activity_segments,
     select_activity_candidate_frame_groups,
 )
 
@@ -114,6 +115,7 @@ def main() -> None:
         "open_activity_segments": args.open_activity_segments,
         "open_activity_segment_count": len(activity_segments),
         "fallback_top_segments": args.fallback_top_segments,
+        "fallback_retrieval_method": "deterministic_phase_action_cues_v1",
         "fallback_max_clips_per_segment": args.fallback_max_clips_per_segment,
         "fallback_frames_per_clip": args.fallback_frames_per_clip,
         "fallback_min_confidence": args.fallback_min_confidence,
@@ -165,7 +167,7 @@ def main() -> None:
                 )
                 continue
             try:
-                candidate_ids, retrieval_rationale = reader.rerank_activity_segments(
+                ranked_catalog = rank_open_activity_segments(
                     phase,
                     activity_catalog,
                     top_segments=args.fallback_top_segments,
@@ -173,8 +175,10 @@ def main() -> None:
                 by_segment_id = {
                     str(segment["segment_id"]): segment for segment in activity_segments
                 }
+                candidate_ids = [str(item["segment_id"]) for item in ranked_catalog]
                 candidate_segments = [
-                    by_segment_id[segment_id] for segment_id in candidate_ids
+                    {**by_segment_id[str(item["segment_id"])], **item}
+                    for item in ranked_catalog
                 ]
                 verification_frames = select_activity_candidate_frame_groups(
                     graph,
@@ -189,7 +193,8 @@ def main() -> None:
                 phase_fallback = {
                     "formal_phase_error": formal_error,
                     "top_segment_ids": candidate_ids,
-                    "retrieval_rationale": retrieval_rationale,
+                    "retrieval_method": "deterministic_phase_action_cues_v1",
+                    "retrieval_candidates": ranked_catalog,
                     "verification": verification,
                     "verification_evidence": verification_frames,
                     "qa_options_used": False,

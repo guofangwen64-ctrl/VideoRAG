@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,26 @@ PHASE_INSTRUMENT_READER_VERSION = "phase-instrument-track-reader-v2-query-fallba
 
 _GENERIC_FAMILIES = {"generic_instrument", "generic_object"}
 _CONFIDENCE = {"high": 0.9, "medium": 0.65, "low": 0.35}
+_PHASE_CUE_GROUPS = {
+    "sutur": {
+        "insert",
+        "knot",
+        "loop",
+        "needle",
+        "pass",
+        "pull",
+        "thread",
+        "tighten",
+    },
+    "clamp": {"clamp", "compress", "forceps", "grasp", "hold", "occlusion"},
+    "occlu": {"clamp", "compress", "forceps", "grasp", "hold", "occlusion"},
+    "suspend": {"elevate", "hold", "lift", "pull", "retract", "tension"},
+    "retract": {"elevate", "hold", "lift", "pull", "retract", "tension"},
+    "dissect": {"cut", "dissect", "expose", "grasp", "separate"},
+    "hemost": {"cauter", "coagulate", "press", "red", "seal"},
+    "perfusion": {"needle", "spacer", "tube", "tubular"},
+    "prepar": {"apply", "clean", "clear", "initial", "prepare"},
+}
 
 
 def load_open_activity_segments(
@@ -75,6 +96,56 @@ def build_open_activity_catalog(
             }
         )
     return catalog
+
+
+def rank_open_activity_segments(
+    phase_label: str,
+    catalog: Sequence[dict[str, Any]],
+    *,
+    top_segments: int = 3,
+) -> list[dict[str, Any]]:
+    """Deterministically retrieve activity segments using generic phase-action cues."""
+    if top_segments < 1:
+        raise ValueError("top_segments must be at least 1")
+    phase_tokens = set(re.findall(r"[a-z0-9]+", phase_label.lower()))
+    phase_tokens -= {"phase", "the", "of", "and"}
+    cue_tokens = set(phase_tokens)
+    for trigger, values in _PHASE_CUE_GROUPS.items():
+        if any(trigger in token for token in phase_tokens):
+            cue_tokens.update(values)
+    ranked = []
+    for item in catalog:
+        primary = " ".join(
+            [str(item.get("activity_label", "")), str(item.get("observed_pattern", ""))]
+        ).lower()
+        context = " ".join(
+            [
+                str(item.get("previous_activity", "")),
+                str(item.get("next_activity", "")),
+            ]
+        ).lower()
+        direct_hits = sorted(token for token in phase_tokens if token in primary)
+        cue_hits = sorted(token for token in cue_tokens if token in primary)
+        context_hits = sorted(token for token in cue_tokens if token in context)
+        score = 3.0 * len(direct_hits) + len(cue_hits) + 0.2 * len(context_hits)
+        ranked.append(
+            {
+                **dict(item),
+                "retrieval_score": round(score, 4),
+                "direct_phase_hits": direct_hits,
+                "activity_cue_hits": cue_hits,
+                "context_cue_hits": context_hits,
+                "retrieval_method": "deterministic_phase_action_cues_v1",
+            }
+        )
+    ranked.sort(
+        key=lambda item: (
+            -float(item["retrieval_score"]),
+            int(item["sequence_index"]),
+            str(item["segment_id"]),
+        )
+    )
+    return ranked[:top_segments]
 
 
 def select_activity_candidate_frame_groups(

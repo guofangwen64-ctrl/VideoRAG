@@ -246,45 +246,6 @@ class OpenAICompatibleGraphQA:
             raise RuntimeError(f"Event reranker returned no valid event IDs: {text}")
         return event_ids, ""
 
-    def rerank_activity_segments(
-        self,
-        phase_label: str,
-        catalog: Sequence[dict[str, Any]],
-        *,
-        top_segments: int = 3,
-    ) -> tuple[list[str], str]:
-        """Retrieve weak phase candidates from observation-only activity summaries."""
-        if top_segments < 1:
-            raise ValueError("top_segments must be at least 1")
-        known_ids = {str(item["segment_id"]) for item in catalog}
-        prompt = (
-            "You are retrieving a surgical phase from a complete ordered sequence of "
-            "observation-derived activity segments. No segment has a trusted phase "
-            "label. Use visible activity patterns plus previous/next activity context "
-            "to rank where the requested phase most plausibly occurs. This is retrieval, "
-            "not a permanent phase annotation. Do not infer any QA answer or instrument "
-            f"choice. Return at most {top_segments} complete segment IDs copied from "
-            "the catalog in best-first order, separated by commas. Return IDs only; "
-            "do not use JSON, Markdown, or explanatory text.\nTarget phase: "
-            + phase_label
-            + "\nOrdered activity catalog:\n"
-            + json.dumps(list(catalog), ensure_ascii=False, separators=(",", ":"))
-        )
-        text = self._plain_text_response(prompt, max_tokens=64)
-        raw_ids = re.findall(r"open_activity:\d{5}", text)
-        segment_ids = []
-        for item in raw_ids:
-            segment_id = str(item)
-            if segment_id in known_ids and segment_id not in segment_ids:
-                segment_ids.append(segment_id)
-            if len(segment_ids) >= top_segments:
-                break
-        if not segment_ids:
-            raise RuntimeError(
-                f"Activity reranker returned no valid segment IDs: {text}"
-            )
-        return segment_ids, ""
-
     def verify_phase_activity_candidates(
         self,
         phase_label: str,
@@ -302,6 +263,8 @@ class OpenAICompatibleGraphQA:
                 "observed_pattern": item.get("observed_pattern"),
                 "start_seconds": item.get("start_seconds"),
                 "end_seconds": item.get("end_seconds"),
+                "retrieval_score": item.get("retrieval_score"),
+                "activity_cue_hits": item.get("activity_cue_hits", []),
             }
             for item in candidates
         ]
@@ -483,15 +446,6 @@ class OpenAICompatibleGraphQA:
             temperature=0,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
-        )
-        return response.choices[0].message.content or ""
-
-    def _plain_text_response(self, prompt: str, *, max_tokens: int) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 

@@ -41,6 +41,7 @@ from .phase_instrument_reader import (
     build_phase_instrument_reader_input,
     build_query_conditioned_phase_reader_input,
     load_open_activity_segments,
+    rank_open_activity_segments,
     select_activity_candidate_frame_groups,
 )
 from .retrieval import (
@@ -145,6 +146,7 @@ __all__ = [
     "normalize_sequence_phase_response",
     "normalize_strict_phase_mapping_response",
     "project_sequence_phases_to_events",
+    "rank_open_activity_segments",
     "retrieve_phase_boundary_instruments",
     "select_event_frame_groups",
     "select_activity_candidate_frame_groups",

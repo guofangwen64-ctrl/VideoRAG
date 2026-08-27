@@ -14,6 +14,7 @@ from medhorizon_videorag.graph_rag import (
     build_video_semantic_ontology,
     extract_phase_name,
     load_open_activity_segments,
+    rank_open_activity_segments,
     retrieve_phase_boundary_instruments,
     select_activity_candidate_frame_groups,
 )
@@ -320,6 +321,7 @@ def test_open_activity_loader_catalog_and_visual_groups(tmp_path: Path) -> None:
 
     segments = load_open_activity_segments(path, video_id="case")
     catalog = build_open_activity_catalog(segments)
+    ranked = rank_open_activity_segments("Example Suturing", catalog, top_segments=1)
     frame_root = tmp_path / "frames"
     frame_root.mkdir()
     groups = select_activity_candidate_frame_groups(
@@ -331,6 +333,8 @@ def test_open_activity_loader_catalog_and_visual_groups(tmp_path: Path) -> None:
 
     assert catalog[0]["next_activity"] == "second activity"
     assert catalog[1]["previous_activity"] == "first activity"
+    assert ranked[0]["segment_id"] == "open_activity:00001"
+    assert "thread" in ranked[0]["activity_cue_hits"]
     assert [group["segment_id"] for group in groups] == [
         "open_activity:00000",
         "open_activity:00001",

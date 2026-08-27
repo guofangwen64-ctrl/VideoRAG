@@ -71,6 +71,7 @@ retrieval:
     query_conditioned_phase_fallback:
       enabled: true
       source: open_activity_segments
+      retrieval: deterministic_phase_action_cues_v1
       top_segments: 3
       max_clips_per_segment: 2
       frames_per_clip: 4
