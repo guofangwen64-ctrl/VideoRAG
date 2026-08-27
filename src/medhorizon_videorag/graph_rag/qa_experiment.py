@@ -263,20 +263,15 @@ class OpenAICompatibleGraphQA:
             "label. Use visible activity patterns plus previous/next activity context "
             "to rank where the requested phase most plausibly occurs. This is retrieval, "
             "not a permanent phase annotation. Do not infer any QA answer or instrument "
-            "choice. Return only JSON with keys segment_ids and rationale. segment_ids "
-            f"must contain at most {top_segments} complete IDs copied from the catalog "
-            "in best-first order.\nTarget phase: "
+            f"choice. Return at most {top_segments} complete segment IDs copied from "
+            "the catalog in best-first order, separated by commas. Return IDs only; "
+            "do not use JSON, Markdown, or explanatory text.\nTarget phase: "
             + phase_label
             + "\nOrdered activity catalog:\n"
             + json.dumps(list(catalog), ensure_ascii=False, separators=(",", ":"))
         )
-        text = self._text_response(prompt, max_tokens=256)
-        payload = _parse_json_object(text)
-        raw_ids = payload.get("segment_ids", [])
-        if isinstance(raw_ids, str):
-            raw_ids = [raw_ids]
-        if not isinstance(raw_ids, list):
-            raise TypeError(f"Activity reranker returned invalid segment_ids: {text}")
+        text = self._plain_text_response(prompt, max_tokens=64)
+        raw_ids = re.findall(r"open_activity:\d{5}", text)
         segment_ids = []
         for item in raw_ids:
             segment_id = str(item)
@@ -288,7 +283,7 @@ class OpenAICompatibleGraphQA:
             raise RuntimeError(
                 f"Activity reranker returned no valid segment IDs: {text}"
             )
-        return segment_ids, str(payload.get("rationale", ""))
+        return segment_ids, ""
 
     def verify_phase_activity_candidates(
         self,
@@ -488,6 +483,15 @@ class OpenAICompatibleGraphQA:
             temperature=0,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content or ""
+
+    def _plain_text_response(self, prompt: str, *, max_tokens: int) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 

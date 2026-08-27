@@ -107,9 +107,8 @@ def test_onset_selection_returns_uniform_traceable_frames(tmp_path: Path) -> Non
 
 def test_query_conditioned_activity_rerank_and_verification() -> None:
     client = OpenAICompatibleGraphQA.__new__(OpenAICompatibleGraphQA)
-    client._text_response = lambda prompt, max_tokens: (  # type: ignore[method-assign]
-        '{"segment_ids":["open_activity:00002","open_activity:00001"],'
-        '"rationale":"sequence match"}'
+    client._plain_text_response = lambda prompt, max_tokens: (  # type: ignore[method-assign]
+        "open_activity:00002, open_activity:00001"
     )
     catalog = [
         {"segment_id": "open_activity:00001", "activity_label": "first"},
@@ -121,7 +120,7 @@ def test_query_conditioned_activity_rerank_and_verification() -> None:
     )
 
     assert segment_ids == ["open_activity:00002", "open_activity:00001"]
-    assert rationale == "sequence match"
+    assert rationale == ""
     client._vision_json = lambda content, max_tokens: {  # type: ignore[method-assign]
         "selected_segment_id": "open_activity:00002",
         "confidence": "medium",
