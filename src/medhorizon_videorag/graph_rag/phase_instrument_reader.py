@@ -34,6 +34,12 @@ _PHASE_CUE_GROUPS = {
     "perfusion": {"needle", "spacer", "tube", "tubular"},
     "prepar": {"apply", "clean", "clear", "initial", "prepare"},
 }
+_PHASE_SPECIFIC_CUE_GROUPS = {
+    "aortic": {"clamp", "compress", "occlusion"},
+    "pericard": {"elevate", "lift", "membrane", "retract", "suspend"},
+    "perfusion": {"spacer", "tube", "tubular"},
+    "spacer": {"spacer", "tube", "tubular"},
+}
 
 
 def load_open_activity_segments(
@@ -111,9 +117,13 @@ def rank_open_activity_segments(
     phase_tokens = set(re.findall(r"[a-z0-9]+", phase_label.lower()))
     phase_tokens -= {"phase", "the", "of", "and"}
     cue_tokens = set(phase_tokens)
+    specific_cues: set[str] = set()
     for trigger, values in _PHASE_CUE_GROUPS.items():
         if any(trigger in token for token in phase_tokens):
             cue_tokens.update(values)
+    for trigger, values in _PHASE_SPECIFIC_CUE_GROUPS.items():
+        if any(trigger in token for token in phase_tokens):
+            specific_cues.update(values)
     ranked = []
     for item in catalog:
         primary = " ".join(
@@ -128,7 +138,13 @@ def rank_open_activity_segments(
         direct_hits = sorted(token for token in phase_tokens if token in primary)
         cue_hits = sorted(token for token in cue_tokens if token in primary)
         context_hits = sorted(token for token in cue_tokens if token in context)
-        score = 3.0 * len(direct_hits) + len(cue_hits) + 0.2 * len(context_hits)
+        specific_hits = sorted(token for token in specific_cues if token in primary)
+        score = (
+            3.0 * len(direct_hits)
+            + len(cue_hits)
+            + 2.0 * len(specific_hits)
+            + 0.2 * len(context_hits)
+        )
         ranked.append(
             {
                 **dict(item),
@@ -136,6 +152,7 @@ def rank_open_activity_segments(
                 "direct_phase_hits": direct_hits,
                 "activity_cue_hits": cue_hits,
                 "context_cue_hits": context_hits,
+                "phase_specific_cue_hits": specific_hits,
                 "retrieval_method": "deterministic_phase_action_cues_v1",
             }
         )

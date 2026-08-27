@@ -335,6 +335,26 @@ def test_open_activity_loader_catalog_and_visual_groups(tmp_path: Path) -> None:
     assert catalog[1]["previous_activity"] == "first activity"
     assert ranked[0]["segment_id"] == "open_activity:00001"
     assert "thread" in ranked[0]["activity_cue_hits"]
+    perfusion_ranked = rank_open_activity_segments(
+        "Perfusion Needle Spacer Suturing",
+        [
+            {
+                "segment_id": "general",
+                "sequence_index": 0,
+                "activity_label": "needle pulls thread into a knot",
+                "observed_pattern": "needle and thread manipulation",
+            },
+            {
+                "segment_id": "specific",
+                "sequence_index": 1,
+                "activity_label": "needle passes beside a tubular structure",
+                "observed_pattern": "thread and tubular object are visible",
+            },
+        ],
+        top_segments=1,
+    )
+    assert perfusion_ranked[0]["segment_id"] == "specific"
+    assert "tubular" in perfusion_ranked[0]["phase_specific_cue_hits"]
     assert [group["segment_id"] for group in groups] == [
         "open_activity:00000",
         "open_activity:00001",
