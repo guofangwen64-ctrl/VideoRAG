@@ -127,9 +127,7 @@ def test_query_conditioned_activity_rerank_and_verification() -> None:
         "confidence": "medium",
         "rationale": "frames support the candidate",
     }
-    verification = client.verify_phase_activity_candidates(
-        "Target Phase", catalog, []
-    )
+    verification = client.verify_phase_activity_candidates("Target Phase", catalog, [])
     assert verification == {
         "selected_segment_id": "open_activity:00002",
         "confidence": "medium",

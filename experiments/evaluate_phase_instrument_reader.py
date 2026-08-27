@@ -160,8 +160,7 @@ def main() -> None:
                 _append_jsonl(predictions_path, row)
                 rows.append(row)
                 print(
-                    f"[{number}/{len(selected)}] {item.uid}: "
-                    f"unresolved graph: {error}",
+                    f"[{number}/{len(selected)}] {item.uid}: unresolved graph: {error}",
                     flush=True,
                 )
                 continue
@@ -172,8 +171,7 @@ def main() -> None:
                     top_segments=args.fallback_top_segments,
                 )
                 by_segment_id = {
-                    str(segment["segment_id"]): segment
-                    for segment in activity_segments
+                    str(segment["segment_id"]): segment for segment in activity_segments
                 }
                 candidate_segments = [
                     by_segment_id[segment_id] for segment_id in candidate_ids
@@ -245,9 +243,7 @@ def main() -> None:
                 )
                 _append_jsonl(predictions_path, row)
                 rows.append(row)
-                print(
-                    f"[{number}/{len(selected)}] {item.uid}: {reason}", flush=True
-                )
+                print(f"[{number}/{len(selected)}] {item.uid}: {reason}", flush=True)
                 continue
             except Exception as fallback_error:  # noqa: BLE001
                 _append_jsonl(

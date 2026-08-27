@@ -41,7 +41,9 @@ def load_open_activity_segments(
         start = float(row.get("start_seconds", -1))
         end = float(row.get("end_seconds", -1))
         if start < 0 or end <= start or start < previous_end:
-            raise ValueError("Open activity segments must be ordered and non-overlapping")
+            raise ValueError(
+                "Open activity segments must be ordered and non-overlapping"
+            )
         seen.add(segment_id)
         previous_end = end
         rows.append(row)

@@ -285,7 +285,9 @@ class OpenAICompatibleGraphQA:
             if len(segment_ids) >= top_segments:
                 break
         if not segment_ids:
-            raise RuntimeError(f"Activity reranker returned no valid segment IDs: {text}")
+            raise RuntimeError(
+                f"Activity reranker returned no valid segment IDs: {text}"
+            )
         return segment_ids, str(payload.get("rationale", ""))
 
     def verify_phase_activity_candidates(
