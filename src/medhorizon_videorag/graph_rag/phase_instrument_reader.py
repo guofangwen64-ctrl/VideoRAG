@@ -36,7 +36,6 @@ _PHASE_CUE_GROUPS = {
 }
 _PHASE_SPECIFIC_CUE_GROUPS = {
     "aortic": {"clamp", "compress", "occlusion"},
-    "pericard": {"elevate", "lift", "membrane", "retract", "suspend"},
     "perfusion": {"spacer", "tube", "tubular"},
     "spacer": {"spacer", "tube", "tubular"},
 }
