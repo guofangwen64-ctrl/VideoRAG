@@ -27,6 +27,7 @@ _PHASE_CUE_GROUPS = {
     "clamp": {"clamp", "compress", "forceps", "grasp", "hold", "occlusion"},
     "occlu": {"clamp", "compress", "forceps", "grasp", "hold", "occlusion"},
     "suspend": {"elevate", "hold", "lift", "pull", "retract", "tension"},
+    "suspens": {"elevate", "hold", "lift", "pull", "retract", "tension"},
     "retract": {"elevate", "hold", "lift", "pull", "retract", "tension"},
     "dissect": {"cut", "dissect", "expose", "grasp", "separate"},
     "hemost": {"cauter", "coagulate", "press", "red", "seal"},
