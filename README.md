@@ -229,12 +229,15 @@ python experiments/evaluate_phase_instrument_graph.py \
 
 ### Phase-Instrument 外观轨迹 Reader
 
-`evaluate_phase_instrument_reader.py` 实现阶段边界到最终多选答案的完整诊断链。图检索阶段不读取 QA 选项或答案，只根据阶段起点、轨迹结构支持、外观具体程度、动作角色和可读帧选择候选；随后 VLM Reader 同时查看外观轨迹目录、对应 observation 帧和题目选项，返回选项及实际采用的 track ID。没有可靠阶段节点时记录为 `unresolved_graph`，不强制猜测。
+`evaluate_phase_instrument_reader.py` 实现阶段边界到最终多选答案的完整诊断链。图检索阶段不读取 QA 选项或答案，只根据阶段起点、轨迹结构支持、外观具体程度、动作角色和可读帧选择候选；随后 VLM Reader 同时查看外观轨迹目录、对应 observation 帧和题目选项，返回选项及实际采用的 track ID。
+
+v2 增加查询条件阶段回退：正式图中没有目标阶段时，模型先仅根据目标阶段名从完整有序的 `open_activity_segments` 检索 Top-3，再用每个候选段的多尺度 observation 摘要和代表帧选择一个临时候选；程序把候选段起点映射到现有 temporal events 和外观轨迹，然后接回同一个器械 Reader。该结果标记为 `query_conditioned_activity_fallback`，不写回永久图。阶段检索和视觉确认均看不到 QA 器械选项或答案；无法接受候选时仍记录为 `unresolved_graph`。
 
 ```bash
 OPENAI_API_KEY=EMPTY python experiments/evaluate_phase_instrument_reader.py \
   --annotations medhorizon_test.jsonl \
   --graph artifacts/graph_rag/<video>/<run>/combined_semantic_graph/semantic_evidence_graph.json \
+  --open-activity-segments artifacts/graph_rag/<video>/<run>/open_activity_segments.json \
   --video-key <video> --qa-uids 2,3,4,5 \
   --model Qwen/Qwen2.5-VL-7B-Instruct \
   --base-url http://127.0.0.1:8002/v1 \

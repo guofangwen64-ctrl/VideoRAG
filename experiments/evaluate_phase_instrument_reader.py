@@ -19,9 +19,13 @@ from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.graph_rag import (
     PHASE_INSTRUMENT_READER_VERSION,
     OpenAICompatibleGraphQA,
+    build_open_activity_catalog,
     build_phase_instrument_reader_input,
+    build_query_conditioned_phase_reader_input,
     extract_phase_name,
     load_evidence_graph,
+    load_open_activity_segments,
+    select_activity_candidate_frame_groups,
 )
 
 
@@ -32,6 +36,7 @@ def main() -> None:
     parser.add_argument("--video-key", required=True)
     parser.add_argument("--qa-uids", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--open-activity-segments")
     parser.add_argument("--model", default="Qwen/Qwen2.5-VL-7B-Instruct")
     parser.add_argument("--base-url", default="http://127.0.0.1:8002/v1")
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
@@ -40,6 +45,14 @@ def main() -> None:
     parser.add_argument("--max-evidence-clips", type=int, default=4)
     parser.add_argument("--frames-per-clip", type=int, default=8)
     parser.add_argument("--max-image-pixels", type=int, default=200704)
+    parser.add_argument("--fallback-top-segments", type=int, default=3)
+    parser.add_argument("--fallback-max-clips-per-segment", type=int, default=2)
+    parser.add_argument("--fallback-frames-per-clip", type=int, default=4)
+    parser.add_argument(
+        "--fallback-min-confidence",
+        choices=("low", "medium", "high"),
+        default="low",
+    )
     args = parser.parse_args()
 
     output = Path(args.output_dir)
@@ -73,6 +86,14 @@ def main() -> None:
         raise ValueError(
             f"Graph video {graph.video_id} does not match {args.video_key}"
         )
+    activity_segments = (
+        load_open_activity_segments(
+            args.open_activity_segments, video_id=args.video_key
+        )
+        if args.open_activity_segments
+        else []
+    )
+    activity_catalog = build_open_activity_catalog(activity_segments)
     reader = OpenAICompatibleGraphQA(
         model=args.model,
         base_url=args.base_url,
@@ -90,6 +111,13 @@ def main() -> None:
         "max_evidence_clips": args.max_evidence_clips,
         "frames_per_clip": args.frames_per_clip,
         "max_image_pixels": args.max_image_pixels,
+        "open_activity_segments": args.open_activity_segments,
+        "open_activity_segment_count": len(activity_segments),
+        "fallback_top_segments": args.fallback_top_segments,
+        "fallback_max_clips_per_segment": args.fallback_max_clips_per_segment,
+        "fallback_frames_per_clip": args.fallback_frames_per_clip,
+        "fallback_min_confidence": args.fallback_min_confidence,
+        "query_conditioned_fallback_enabled": bool(activity_segments),
         "instrument_identity_annotations_used": False,
         "answers_used_for_retrieval_or_reader": False,
         "qa_options_used_only_by_reader": True,
@@ -107,6 +135,8 @@ def main() -> None:
             raise ValueError(
                 f"Cannot extract phase from QA {item.uid}: {item.question}"
             )
+        formal_error: str | None = None
+        phase_fallback: dict[str, Any] | None = None
         try:
             reader_input = build_phase_instrument_reader_input(
                 graph,
@@ -117,20 +147,135 @@ def main() -> None:
                 frames_per_clip=args.frames_per_clip,
             )
         except ValueError as error:
-            row = _result_row(
-                item,
-                phase,
-                status="unresolved_graph",
-                elapsed=time.monotonic() - started,
-                unresolved_reason=str(error),
-            )
-            _append_jsonl(predictions_path, row)
-            rows.append(row)
-            print(
-                f"[{number}/{len(selected)}] {item.uid}: unresolved graph: {error}",
-                flush=True,
-            )
-            continue
+            formal_error = str(error)
+            if not activity_segments:
+                row = _result_row(
+                    item,
+                    phase,
+                    status="unresolved_graph",
+                    elapsed=time.monotonic() - started,
+                    unresolved_reason=formal_error,
+                    phase_route="unresolved",
+                )
+                _append_jsonl(predictions_path, row)
+                rows.append(row)
+                print(
+                    f"[{number}/{len(selected)}] {item.uid}: "
+                    f"unresolved graph: {error}",
+                    flush=True,
+                )
+                continue
+            try:
+                candidate_ids, retrieval_rationale = reader.rerank_activity_segments(
+                    phase,
+                    activity_catalog,
+                    top_segments=args.fallback_top_segments,
+                )
+                by_segment_id = {
+                    str(segment["segment_id"]): segment
+                    for segment in activity_segments
+                }
+                candidate_segments = [
+                    by_segment_id[segment_id] for segment_id in candidate_ids
+                ]
+                verification_frames = select_activity_candidate_frame_groups(
+                    graph,
+                    candidate_segments,
+                    max_clips_per_segment=args.fallback_max_clips_per_segment,
+                    frames_per_clip=args.fallback_frames_per_clip,
+                )
+                verification = reader.verify_phase_activity_candidates(
+                    phase, candidate_segments, verification_frames
+                )
+                selected_segment_id = verification["selected_segment_id"]
+                phase_fallback = {
+                    "formal_phase_error": formal_error,
+                    "top_segment_ids": candidate_ids,
+                    "retrieval_rationale": retrieval_rationale,
+                    "verification": verification,
+                    "verification_evidence": verification_frames,
+                    "qa_options_used": False,
+                    "answer_used": False,
+                }
+                if selected_segment_id is None or not _confidence_meets(
+                    verification["confidence"], args.fallback_min_confidence
+                ):
+                    reason = (
+                        "Query-conditioned phase verification did not accept a "
+                        f"candidate: {verification}"
+                    )
+                    row = _result_row(
+                        item,
+                        phase,
+                        status="unresolved_graph",
+                        elapsed=time.monotonic() - started,
+                        unresolved_reason=reason,
+                        phase_route="query_conditioned_activity_fallback",
+                        phase_fallback=phase_fallback,
+                    )
+                    _append_jsonl(predictions_path, row)
+                    rows.append(row)
+                    print(
+                        f"[{number}/{len(selected)}] {item.uid}: "
+                        "fallback found no acceptable phase candidate",
+                        flush=True,
+                    )
+                    continue
+                reader_input = build_query_conditioned_phase_reader_input(
+                    graph,
+                    phase,
+                    by_segment_id[selected_segment_id],
+                    verification_confidence=verification["confidence"],
+                    verification_rationale=verification["rationale"],
+                    context_events=args.context_events,
+                    max_tracks=args.max_tracks,
+                    max_evidence_clips=args.max_evidence_clips,
+                    frames_per_clip=args.frames_per_clip,
+                )
+            except ValueError as fallback_error:
+                reason = f"{formal_error}; fallback unresolved: {fallback_error}"
+                row = _result_row(
+                    item,
+                    phase,
+                    status="unresolved_graph",
+                    elapsed=time.monotonic() - started,
+                    unresolved_reason=reason,
+                    phase_route="query_conditioned_activity_fallback",
+                    phase_fallback=phase_fallback,
+                )
+                _append_jsonl(predictions_path, row)
+                rows.append(row)
+                print(
+                    f"[{number}/{len(selected)}] {item.uid}: {reason}", flush=True
+                )
+                continue
+            except Exception as fallback_error:  # noqa: BLE001
+                _append_jsonl(
+                    errors_path,
+                    {
+                        "id": str(item.uid),
+                        "stage": "phase_fallback",
+                        "error_type": type(fallback_error).__name__,
+                        "error": _safe_error(fallback_error),
+                    },
+                )
+                row = _result_row(
+                    item,
+                    phase,
+                    status="reader_failed",
+                    elapsed=time.monotonic() - started,
+                    unresolved_reason=_safe_error(fallback_error),
+                    phase_route="query_conditioned_activity_fallback",
+                    phase_fallback=phase_fallback,
+                )
+                _append_jsonl(predictions_path, row)
+                rows.append(row)
+                print(
+                    f"[{number}/{len(selected)}] FAILED phase fallback {item.uid}: "
+                    f"{type(fallback_error).__name__}: {_safe_error(fallback_error)}",
+                    flush=True,
+                )
+                continue
 
         try:
             prediction, rationale, selected_track_ids = reader.answer_phase_instrument(
@@ -145,6 +290,8 @@ def main() -> None:
                 rationale=rationale,
                 selected_track_ids=selected_track_ids,
                 reader_input=reader_input,
+                phase_route=reader_input["phase_route"],
+                phase_fallback=phase_fallback,
             )
             _append_jsonl(predictions_path, row)
             rows.append(row)
@@ -169,6 +316,8 @@ def main() -> None:
                 elapsed=time.monotonic() - started,
                 unresolved_reason=_safe_error(error),
                 reader_input=reader_input,
+                phase_route=reader_input["phase_route"],
+                phase_fallback=phase_fallback,
             )
             _append_jsonl(predictions_path, row)
             rows.append(row)
@@ -179,6 +328,7 @@ def main() -> None:
             )
 
     completed = [row for row in rows if row["status"] == "completed"]
+    route_counts = Counter(str(row["phase_route"]) for row in rows)
     report: dict[str, Any] = {
         "requested": len(rows),
         "completed": len(completed),
@@ -194,6 +344,12 @@ def main() -> None:
             else None
         ),
         "prediction_counts": dict(Counter(str(row["prediction"]) for row in completed)),
+        "phase_route_counts": dict(route_counts),
+        "query_conditioned_completed": sum(
+            row["status"] == "completed"
+            and row["phase_route"] == "query_conditioned_activity_fallback"
+            for row in rows
+        ),
         "instrument_identity_annotations_used": False,
         "answers_used_for_retrieval_or_reader": False,
         "candidate_aware_phase_graph": True,
@@ -215,6 +371,8 @@ def _result_row(
     selected_track_ids: list[str] | None = None,
     unresolved_reason: str | None = None,
     reader_input: dict[str, Any] | None = None,
+    phase_route: str | None = None,
+    phase_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(item.uid),
@@ -230,6 +388,8 @@ def _result_row(
         "rationale": rationale,
         "selected_track_ids": selected_track_ids or [],
         "reader_input": reader_input,
+        "phase_route": phase_route,
+        "phase_fallback": phase_fallback,
         "unresolved_reason": unresolved_reason,
         "elapsed_seconds": round(elapsed, 3),
     }
@@ -247,6 +407,11 @@ def _safe_error(error: Exception) -> str:
         r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "<image-data>", str(error)
     )
     return message[:2000]
+
+
+def _confidence_meets(value: str, threshold: str) -> bool:
+    ranks = {"low": 0, "medium": 1, "high": 2}
+    return ranks.get(str(value).lower(), -1) >= ranks[threshold]
 
 
 if __name__ == "__main__":

@@ -246,6 +246,116 @@ class OpenAICompatibleGraphQA:
             raise RuntimeError(f"Event reranker returned no valid event IDs: {text}")
         return event_ids, ""
 
+    def rerank_activity_segments(
+        self,
+        phase_label: str,
+        catalog: Sequence[dict[str, Any]],
+        *,
+        top_segments: int = 3,
+    ) -> tuple[list[str], str]:
+        """Retrieve weak phase candidates from observation-only activity summaries."""
+        if top_segments < 1:
+            raise ValueError("top_segments must be at least 1")
+        known_ids = {str(item["segment_id"]) for item in catalog}
+        prompt = (
+            "You are retrieving a surgical phase from a complete ordered sequence of "
+            "observation-derived activity segments. No segment has a trusted phase "
+            "label. Use visible activity patterns plus previous/next activity context "
+            "to rank where the requested phase most plausibly occurs. This is retrieval, "
+            "not a permanent phase annotation. Do not infer any QA answer or instrument "
+            "choice. Return only JSON with keys segment_ids and rationale. segment_ids "
+            f"must contain at most {top_segments} complete IDs copied from the catalog "
+            "in best-first order.\nTarget phase: "
+            + phase_label
+            + "\nOrdered activity catalog:\n"
+            + json.dumps(list(catalog), ensure_ascii=False, separators=(",", ":"))
+        )
+        text = self._text_response(prompt, max_tokens=256)
+        payload = _parse_json_object(text)
+        raw_ids = payload.get("segment_ids", [])
+        if isinstance(raw_ids, str):
+            raw_ids = [raw_ids]
+        if not isinstance(raw_ids, list):
+            raise TypeError(f"Activity reranker returned invalid segment_ids: {text}")
+        segment_ids = []
+        for item in raw_ids:
+            segment_id = str(item)
+            if segment_id in known_ids and segment_id not in segment_ids:
+                segment_ids.append(segment_id)
+            if len(segment_ids) >= top_segments:
+                break
+        if not segment_ids:
+            raise RuntimeError(f"Activity reranker returned no valid segment IDs: {text}")
+        return segment_ids, str(payload.get("rationale", ""))
+
+    def verify_phase_activity_candidates(
+        self,
+        phase_label: str,
+        candidates: Sequence[dict[str, Any]],
+        evidence_groups: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Visually select one query-conditioned phase candidate without QA options."""
+        known_ids = {str(item["segment_id"]) for item in candidates}
+        if not known_ids:
+            raise ValueError("Phase verification requires activity candidates")
+        catalog = [
+            {
+                "segment_id": item["segment_id"],
+                "activity_label": item.get("activity_label"),
+                "observed_pattern": item.get("observed_pattern"),
+                "start_seconds": item.get("start_seconds"),
+                "end_seconds": item.get("end_seconds"),
+            }
+            for item in candidates
+        ]
+        prompt = (
+            "Verify which retrieved activity segment best matches the target surgical "
+            "phase using its observation summary and representative visual frames. "
+            "Do not identify the instrument for a QA answer and do not use answer "
+            "options. Local frames may be ambiguous, so consider the activity sequence, "
+            "but do not claim an anatomical structure that is not visually supported. "
+            "Return only JSON with selected_segment_id, confidence, and rationale. "
+            "selected_segment_id must be one candidate ID, or null if none is plausible. "
+            "confidence must be high, medium, or low.\nTarget phase: "
+            + phase_label
+            + "\nCandidates:\n"
+            + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+        )
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for number, group in enumerate(evidence_groups, start=1):
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"Phase candidate evidence {number}: "
+                        f"segment={group['segment_id']}, clip={group['clip_id']}"
+                    ),
+                }
+            )
+            for frame_path in group["reader_frame_paths"]:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/jpeg;base64,"
+                            + _encode_resized_jpeg(frame_path, self.max_image_pixels)
+                        },
+                    }
+                )
+        payload = self._vision_json(content, max_tokens=256)
+        selected = payload.get("selected_segment_id")
+        selected_id = str(selected) if selected is not None else None
+        if selected_id not in known_ids:
+            selected_id = None
+        confidence = str(payload.get("confidence", "low")).strip().lower()
+        if confidence not in {"high", "medium", "low"}:
+            confidence = "low"
+        return {
+            "selected_segment_id": selected_id,
+            "confidence": confidence,
+            "rationale": str(payload.get("rationale", "")),
+        }
+
     def answer(
         self,
         question: str,

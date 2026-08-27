@@ -61,13 +61,21 @@ retrieval:
   query_aware_representative_reranking: true
   visual_fallback: true
   phase_instrument_reader:
-    version: phase-instrument-track-reader-v1
+    version: phase-instrument-track-reader-v2-query-fallback
     context_events: 1
     max_tracks: 6
     max_evidence_clips: 4
     frames_per_clip: 8
     instrument_identity_annotations_used: false
     qa_options_used_only_by_reader: true
+    query_conditioned_phase_fallback:
+      enabled: true
+      source: open_activity_segments
+      top_segments: 3
+      max_clips_per_segment: 2
+      frames_per_clip: 4
+      min_confidence: low
+      mutate_persistent_graph: false
 llm:
   provider: not_configured
   model: not_configured

@@ -37,7 +37,11 @@ from .qa_experiment import (
 )
 from .phase_instrument_reader import (
     PHASE_INSTRUMENT_READER_VERSION,
+    build_open_activity_catalog,
     build_phase_instrument_reader_input,
+    build_query_conditioned_phase_reader_input,
+    load_open_activity_segments,
+    select_activity_candidate_frame_groups,
 )
 from .retrieval import (
     RETRIEVER_VERSION,
@@ -118,7 +122,9 @@ __all__ = [
     "build_event_observation_catalog",
     "build_evidence_graph",
     "build_open_activity_segmentation_prompt",
+    "build_open_activity_catalog",
     "build_phase_instrument_reader_input",
+    "build_query_conditioned_phase_reader_input",
     "build_sequence_phase_prompt",
     "build_strict_phase_mapping_prompt",
     "build_video_semantic_ontology",
@@ -128,6 +134,7 @@ __all__ = [
     "load_evidence_graph",
     "load_manifest_frame_paths",
     "load_observation_sequence",
+    "load_open_activity_segments",
     "load_semantic_hypotheses",
     "merge_temporal_events",
     "normalize_action",
@@ -140,6 +147,7 @@ __all__ = [
     "project_sequence_phases_to_events",
     "retrieve_phase_boundary_instruments",
     "select_event_frame_groups",
+    "select_activity_candidate_frame_groups",
     "strip_explicit_time_range",
     "write_evidence_graph_artifacts",
     "write_semantic_layer_artifacts",

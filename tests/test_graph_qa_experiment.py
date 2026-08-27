@@ -6,6 +6,7 @@ from medhorizon_videorag.graph_rag import (
     VideoEvidenceGraph,
 )
 from medhorizon_videorag.graph_rag.qa_experiment import (
+    OpenAICompatibleGraphQA,
     build_event_observation_catalog,
     select_event_frame_groups,
     strip_explicit_time_range,
@@ -102,3 +103,35 @@ def test_onset_selection_returns_uniform_traceable_frames(tmp_path: Path) -> Non
     assert len(groups[0]["reader_frame_paths"]) == 4
     assert groups[0]["reader_frame_paths"][0].endswith("00.jpg")
     assert groups[0]["reader_frame_paths"][-1].endswith("07.jpg")
+
+
+def test_query_conditioned_activity_rerank_and_verification() -> None:
+    client = OpenAICompatibleGraphQA.__new__(OpenAICompatibleGraphQA)
+    client._text_response = lambda prompt, max_tokens: (  # type: ignore[method-assign]
+        '{"segment_ids":["open_activity:00002","open_activity:00001"],'
+        '"rationale":"sequence match"}'
+    )
+    catalog = [
+        {"segment_id": "open_activity:00001", "activity_label": "first"},
+        {"segment_id": "open_activity:00002", "activity_label": "second"},
+    ]
+
+    segment_ids, rationale = client.rerank_activity_segments(
+        "Target Phase", catalog, top_segments=2
+    )
+
+    assert segment_ids == ["open_activity:00002", "open_activity:00001"]
+    assert rationale == "sequence match"
+    client._vision_json = lambda content, max_tokens: {  # type: ignore[method-assign]
+        "selected_segment_id": "open_activity:00002",
+        "confidence": "medium",
+        "rationale": "frames support the candidate",
+    }
+    verification = client.verify_phase_activity_candidates(
+        "Target Phase", catalog, []
+    )
+    assert verification == {
+        "selected_segment_id": "open_activity:00002",
+        "confidence": "medium",
+        "rationale": "frames support the candidate",
+    }

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,10 +8,14 @@ from medhorizon_videorag.graph_rag import (
     GraphNode,
     VideoEvidenceGraph,
     augment_with_semantic_hypotheses,
+    build_open_activity_catalog,
     build_phase_instrument_reader_input,
+    build_query_conditioned_phase_reader_input,
     build_video_semantic_ontology,
     extract_phase_name,
+    load_open_activity_segments,
     retrieve_phase_boundary_instruments,
+    select_activity_candidate_frame_groups,
 )
 
 
@@ -249,6 +254,88 @@ def test_appearance_tracks_keep_medical_identity_unknown(tmp_path: Path) -> None
         track["physical_identity_confirmed"] is False
         for track in reader_input["candidate_tracks"]
     )
+
+    activity = {
+        "segment_id": "open_activity:00001",
+        "activity_label": "thread manipulation",
+        "observed_pattern": "needle-like tool passes thread-like material",
+        "start_seconds": 64.0,
+        "end_seconds": 192.0,
+        "supporting_clip_ids": [
+            "case_vgent_00001",
+            "case_vgent_00002",
+        ],
+        "basis_clip_ids": ["case_vgent_00001", "case_vgent_00002"],
+    }
+    fallback_input = build_query_conditioned_phase_reader_input(
+        artifacts.graph,
+        "Unpersisted Suturing Phase",
+        activity,
+        verification_confidence="medium",
+        verification_rationale="thread activity near the candidate onset",
+        max_tracks=3,
+        max_evidence_clips=2,
+        frames_per_clip=1,
+    )
+    assert fallback_input["phase_route"] == "query_conditioned_activity_fallback"
+    assert fallback_input["phase_label"] == "Unpersisted Suturing Phase"
+    assert fallback_input["query_conditioned_phase_candidate"]["segment_id"] == (
+        "open_activity:00001"
+    )
+    assert fallback_input["persistent_graph_mutated"] is False
+
+
+def test_open_activity_loader_catalog_and_visual_groups(tmp_path: Path) -> None:
+    payload = {
+        "video_id": "case",
+        "segments": [
+            {
+                "segment_id": "open_activity:00000",
+                "activity_label": "first activity",
+                "observed_pattern": "tool contacts tissue",
+                "start_seconds": 0.0,
+                "end_seconds": 128.0,
+                "supporting_clip_ids": [
+                    "case_vgent_00000",
+                    "case_vgent_00001",
+                ],
+                "basis_clip_ids": ["case_vgent_00000", "case_vgent_00001"],
+            },
+            {
+                "segment_id": "open_activity:00001",
+                "activity_label": "second activity",
+                "observed_pattern": "thread-like material is pulled",
+                "start_seconds": 128.0,
+                "end_seconds": 256.0,
+                "supporting_clip_ids": [
+                    "case_vgent_00002",
+                    "case_vgent_00003",
+                ],
+                "basis_clip_ids": ["case_vgent_00002", "case_vgent_00003"],
+            },
+        ],
+    }
+    path = tmp_path / "open_activity_segments.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    segments = load_open_activity_segments(path, video_id="case")
+    catalog = build_open_activity_catalog(segments)
+    frame_root = tmp_path / "frames"
+    frame_root.mkdir()
+    groups = select_activity_candidate_frame_groups(
+        _base_graph(frame_root),
+        segments,
+        max_clips_per_segment=1,
+        frames_per_clip=1,
+    )
+
+    assert catalog[0]["next_activity"] == "second activity"
+    assert catalog[1]["previous_activity"] == "first activity"
+    assert [group["segment_id"] for group in groups] == [
+        "open_activity:00000",
+        "open_activity:00001",
+    ]
+    assert all(len(group["reader_frame_paths"]) == 1 for group in groups)
 
 
 def test_semantic_layer_rejects_unknown_track_source(tmp_path: Path) -> None:
