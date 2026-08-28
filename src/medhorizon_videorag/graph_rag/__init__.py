@@ -74,6 +74,7 @@ from .semantic_layer import (
 from .sequence_phase import (
     SEQUENCE_PHASE_VERSION,
     TWO_STAGE_SEQUENCE_PHASE_VERSION,
+    build_relaxed_phase_mapping_prompt,
     build_open_activity_segmentation_prompt,
     build_sequence_phase_prompt,
     build_strict_phase_mapping_prompt,
@@ -126,6 +127,7 @@ __all__ = [
     "build_open_activity_catalog",
     "build_phase_instrument_reader_input",
     "build_query_conditioned_phase_reader_input",
+    "build_relaxed_phase_mapping_prompt",
     "build_sequence_phase_prompt",
     "build_strict_phase_mapping_prompt",
     "build_video_semantic_ontology",

@@ -379,6 +379,7 @@ class OpenAICompatibleGraphQA:
                 "surface_forms": item["surface_forms"],
                 "action_roles": item["action_roles"],
                 "evidence_clip_ids": item["reader_clip_ids"],
+                "option_matches": item.get("option_matches", []),
                 "canonical_instrument": "unknown",
             }
             for item in candidates
@@ -395,7 +396,9 @@ class OpenAICompatibleGraphQA:
             "names a holder or forceps, inspect the grasping track that manipulates the "
             "needle-like object. When options differ only by small versus regular size, "
             "compare relative jaw and shaft scale in the frames rather than defaulting "
-            "to the unsized option. "
+            "to the unsized option. Option-match hints, when present, are lightweight "
+            "prototype cues from option text; treat negative_hits as warnings and "
+            "verify against the images before deciding. "
             "Graph rank is only a retrieval prior. Return only JSON with keys choice, "
             "selected_track_ids, and rationale. choice must be one of "
             f"{labels}; selected_track_ids must come from the catalog.\n"

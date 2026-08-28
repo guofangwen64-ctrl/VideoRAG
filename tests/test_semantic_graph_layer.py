@@ -255,6 +255,24 @@ def test_appearance_tracks_keep_medical_identity_unknown(tmp_path: Path) -> None
         track["physical_identity_confirmed"] is False
         for track in reader_input["candidate_tracks"]
     )
+    assert all(
+        track["option_matches"] == [] for track in reader_input["candidate_tracks"]
+    )
+
+    option_aware_input = build_phase_instrument_reader_input(
+        artifacts.graph,
+        "Left Atrium Suturing",
+        qa_options=["A. Aspirator", "B. Needle Holder"],
+        max_tracks=3,
+        max_evidence_clips=2,
+        frames_per_clip=1,
+    )
+    assert option_aware_input["qa_options_used_for_retrieval"] is True
+    assert any(
+        match["option_label"] == "B"
+        for track in option_aware_input["candidate_tracks"]
+        for match in track["option_matches"]
+    )
 
     activity = {
         "segment_id": "open_activity:00001",

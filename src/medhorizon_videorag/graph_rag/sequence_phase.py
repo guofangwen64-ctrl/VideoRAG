@@ -194,11 +194,56 @@ def build_strict_phase_mapping_prompt(
     )
 
 
+def build_relaxed_phase_mapping_prompt(
+    activity_segments: Sequence[dict[str, Any]], phase_labels: Sequence[str]
+) -> str:
+    if not activity_segments:
+        raise ValueError("Relaxed phase mapping requires activity segments")
+    labels = [str(item).strip() for item in phase_labels if str(item).strip()]
+    if not labels:
+        raise ValueError("Relaxed phase mapping requires candidate phase labels")
+    return (
+        "Map open-vocabulary visible-activity segments to candidate medical phase "
+        "hypotheses for a diagnostic retrieval setting. The activity segmentation "
+        "was produced without phase labels. Use only the visible evidence in each "
+        "segment plus adjacent-segment continuity. Do not use question answers, a "
+        "video title, dataset metadata, or an expected phase order.\n\n"
+        "Return ONLY one valid JSON object with this schema:\n"
+        '{"phase_mappings":[{"segment_id":"open_activity:...",'
+        '"label":"exact candidate or unknown","decision":"supported|tentative|insufficient",'
+        '"confidence":"high|medium|low","positive_cues":["..."],'
+        '"negative_cues":["..."],"missing_evidence":["..."],'
+        '"basis":"brief explanation"}]}\n\n'
+        "Rules:\n"
+        "1. Return exactly one mapping for every supplied segment_id, in order.\n"
+        "2. Use decision='supported' when distinctive visible cues point to one "
+        "candidate phase. Use decision='tentative' when generic actions and local "
+        "continuity make one candidate the best retrieval hypothesis but important "
+        "evidence is missing.\n"
+        "3. Use label='unknown' only when no candidate has meaningful visible support "
+        "or when negative cues contradict the best candidate.\n"
+        "4. Generic cues such as suturing, cutting, retraction, fluid removal, or "
+        "tool manipulation may support a tentative retrieval hypothesis, but they "
+        "must be listed as generic in positive_cues or missing_evidence.\n"
+        "5. positive_cues and negative_cues may contain only evidence already stated "
+        "in the activity segment. Return 1-4 concise positive_cues, 0-3 negative_cues, "
+        "1-3 missing_evidence items, and a basis of at most 50 words.\n\n"
+        "Candidate phases:\n- "
+        + "\n- ".join(labels)
+        + "\n\nOpen activity segments:\n"
+        + json.dumps(list(activity_segments), ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 def normalize_strict_phase_mapping_response(
     payload: dict[str, Any],
     activity_segments: Sequence[dict[str, Any]],
     phase_labels: Sequence[str],
+    *,
+    acceptance_policy: str = "strict",
 ) -> list[dict[str, Any]]:
+    if acceptance_policy not in {"strict", "relaxed"}:
+        raise ValueError("acceptance_policy must be strict or relaxed")
     mappings = payload.get("phase_mappings")
     if not isinstance(mappings, list):
         raise TypeError("Response requires a phase_mappings list")
@@ -220,16 +265,36 @@ def normalize_strict_phase_mapping_response(
         if requested_label is None:
             raise ValueError(f"Phase mapping {number} uses a non-candidate label")
         decision = str(item.get("decision", "insufficient")).strip().lower()
-        if decision not in {"supported", "insufficient"}:
-            raise ValueError("Phase mapping decision must be supported or insufficient")
-        confidence = _confidence_label(item.get("confidence"))
-        distinctive_cues = _string_list(item.get("distinctive_cues"))
-        accepted = (
-            requested_label != "unknown"
-            and decision == "supported"
-            and confidence in {"high", "medium"}
-            and bool(distinctive_cues)
+        allowed_decisions = (
+            {"supported", "tentative", "insufficient"}
+            if acceptance_policy == "relaxed"
+            else {"supported", "insufficient"}
         )
+        if decision not in allowed_decisions:
+            allowed_message = (
+                "supported, tentative, or insufficient"
+                if acceptance_policy == "relaxed"
+                else "supported or insufficient"
+            )
+            raise ValueError(f"Phase mapping decision must be {allowed_message}")
+        confidence = _confidence_label(item.get("confidence"))
+        distinctive_cues = _string_list(
+            item.get("distinctive_cues") or item.get("positive_cues")
+        )
+        if acceptance_policy == "relaxed":
+            accepted = (
+                requested_label != "unknown"
+                and decision in {"supported", "tentative"}
+                and confidence in {"high", "medium"}
+                and bool(distinctive_cues)
+            )
+        else:
+            accepted = (
+                requested_label != "unknown"
+                and decision == "supported"
+                and confidence in {"high", "medium"}
+                and bool(distinctive_cues)
+            )
         label = requested_label if accepted else "unknown"
         final_confidence = confidence if accepted else "low"
         normalized.append(
@@ -251,10 +316,13 @@ def normalize_strict_phase_mapping_response(
                 "activity_label": activity["activity_label"],
                 "observed_pattern": activity["observed_pattern"],
                 "distinctive_cues": distinctive_cues,
+                "positive_cues": distinctive_cues,
+                "negative_cues": _string_list(item.get("negative_cues")),
                 "missing_evidence": _string_list(item.get("missing_evidence")),
                 "basis": str(item.get("basis", "")).strip(),
                 "fact_status": "medical_hypothesis",
                 "mapping_protocol": TWO_STAGE_SEQUENCE_PHASE_VERSION,
+                "acceptance_policy": acceptance_policy,
             }
         )
     return normalized

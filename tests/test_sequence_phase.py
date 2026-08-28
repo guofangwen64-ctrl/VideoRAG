@@ -5,6 +5,7 @@ from medhorizon_videorag.graph_rag import (
     GraphNode,
     VideoEvidenceGraph,
     build_open_activity_segmentation_prompt,
+    build_relaxed_phase_mapping_prompt,
     build_sequence_phase_prompt,
     build_strict_phase_mapping_prompt,
     compact_observation_sequence,
@@ -246,6 +247,51 @@ def test_strict_mapping_rejects_generic_or_low_confidence_labels() -> None:
     assert segments[0]["mapping_accepted"] is False
     assert segments[1]["label"] == "Perfusion Needle Spacer Suturing"
     assert segments[1]["mapping_accepted"] is True
+
+
+def test_relaxed_mapping_accepts_tentative_retrieval_hypotheses() -> None:
+    compact = compact_observation_sequence(_rows())
+    activities = normalize_open_activity_response(_activity_payload(), compact)
+    prompt = build_relaxed_phase_mapping_prompt(
+        activities, ["Preparation", "Perfusion Needle Spacer Suturing"]
+    )
+    assert "decision='tentative'" in prompt
+    payload = {
+        "phase_mappings": [
+            {
+                "segment_id": "open_activity:00000",
+                "label": "Preparation",
+                "decision": "tentative",
+                "confidence": "medium",
+                "positive_cues": ["generic tool setup"],
+                "negative_cues": [],
+                "missing_evidence": ["specific setup landmark"],
+                "basis": "best retrieval hypothesis but not visually definitive",
+            },
+            {
+                "segment_id": "open_activity:00001",
+                "label": "unknown",
+                "decision": "insufficient",
+                "confidence": "low",
+                "positive_cues": [],
+                "negative_cues": [],
+                "missing_evidence": ["no distinctive phase cue"],
+                "basis": "insufficient evidence",
+            },
+        ]
+    }
+
+    segments = normalize_strict_phase_mapping_response(
+        payload,
+        activities,
+        ["Preparation", "Perfusion Needle Spacer Suturing"],
+        acceptance_policy="relaxed",
+    )
+
+    assert segments[0]["label"] == "Preparation"
+    assert segments[0]["mapping_accepted"] is True
+    assert segments[0]["acceptance_policy"] == "relaxed"
+    assert segments[1]["label"] == "unknown"
 
 
 def test_open_activity_basis_is_uniformly_reduced_to_five_clips() -> None:

@@ -17,6 +17,7 @@ from medhorizon_videorag.datasets import MedHorizonDataset
 from medhorizon_videorag.graph_rag import (
     TWO_STAGE_SEQUENCE_PHASE_VERSION,
     build_open_activity_segmentation_prompt,
+    build_relaxed_phase_mapping_prompt,
     build_strict_phase_mapping_prompt,
     build_video_semantic_ontology,
     compact_observation_sequence,
@@ -43,6 +44,11 @@ def main() -> None:
     parser.add_argument("--max-retries", type=int, default=8)
     parser.add_argument("--initial-retry-seconds", type=float, default=30)
     parser.add_argument("--max-retry-seconds", type=float, default=300)
+    parser.add_argument(
+        "--phase-mapping-mode",
+        choices=("strict", "relaxed"),
+        default="strict",
+    )
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
@@ -122,7 +128,10 @@ def main() -> None:
     if args.resume and final_path.is_file():
         print(f"Two-stage result already complete: {output}", flush=True)
         return
-    prompt = build_strict_phase_mapping_prompt(activities, ontology["phases"])
+    if args.phase_mapping_mode == "relaxed":
+        prompt = build_relaxed_phase_mapping_prompt(activities, ontology["phases"])
+    else:
+        prompt = build_strict_phase_mapping_prompt(activities, ontology["phases"])
     response, attempts, elapsed = _request(
         client,
         model=args.model,
@@ -137,12 +146,15 @@ def main() -> None:
         raw_mapping_text + "\n", encoding="utf-8"
     )
     stage2_metric = _metrics(
-        "strict_phase_mapping", prompt, response, attempts, elapsed
+        f"{args.phase_mapping_mode}_phase_mapping", prompt, response, attempts, elapsed
     )
     _write_json(output / "stage2_request_metadata.json", stage2_metric)
     raw_mapping = _parse_json_object(raw_mapping_text)
     segments = normalize_strict_phase_mapping_response(
-        raw_mapping, activities, ontology["phases"]
+        raw_mapping,
+        activities,
+        ontology["phases"],
+        acceptance_policy=args.phase_mapping_mode,
     )
     source = f"openai_compatible:{args.model}:{TWO_STAGE_SEQUENCE_PHASE_VERSION}"
     event_rows = project_sequence_phases_to_events(graph, segments, source=source)
@@ -156,6 +168,7 @@ def main() -> None:
             "version": TWO_STAGE_SEQUENCE_PHASE_VERSION,
             "fact_status": "medical_hypothesis",
             "candidate_aware_diagnostic": True,
+            "phase_mapping_mode": args.phase_mapping_mode,
             "segments": segments,
         },
     )
@@ -186,6 +199,7 @@ def main() -> None:
             "ontology": ontology,
             "semantic_nodes_are_observed_facts": False,
             "candidate_aware_diagnostic": True,
+            "phase_mapping_mode": args.phase_mapping_mode,
             "answers_used": False,
         },
     )

@@ -221,6 +221,7 @@ def build_phase_instrument_reader_input(
     graph: VideoEvidenceGraph,
     phase_label: str,
     *,
+    qa_options: Sequence[str] | None = None,
     boundary_kind: str = "onset",
     context_events: int = 1,
     max_tracks: int = 6,
@@ -239,6 +240,7 @@ def build_phase_instrument_reader_input(
     return _build_track_reader_input(
         graph,
         retrieval,
+        qa_options=qa_options,
         max_tracks=max_tracks,
         max_evidence_clips=max_evidence_clips,
         frames_per_clip=frames_per_clip,
@@ -252,6 +254,7 @@ def build_query_conditioned_phase_reader_input(
     *,
     verification_confidence: str,
     verification_rationale: str,
+    qa_options: Sequence[str] | None = None,
     context_events: int = 1,
     max_tracks: int = 6,
     max_evidence_clips: int = 4,
@@ -320,6 +323,7 @@ def build_query_conditioned_phase_reader_input(
     return _build_track_reader_input(
         graph,
         retrieval,
+        qa_options=qa_options,
         max_tracks=max_tracks,
         max_evidence_clips=max_evidence_clips,
         frames_per_clip=frames_per_clip,
@@ -371,6 +375,7 @@ def _build_track_reader_input(
     graph: VideoEvidenceGraph,
     retrieval: dict[str, Any],
     *,
+    qa_options: Sequence[str] | None,
     max_tracks: int,
     max_evidence_clips: int,
     frames_per_clip: int,
@@ -421,6 +426,10 @@ def _build_track_reader_input(
             for name in ("colors", "shapes", "markings", "appearance", "sizes")
         )
         selected_support = len(item.get("supporting_event_ids", []))
+        option_matches = _option_matches(qa_options or [], track, item, action_roles)
+        option_score = max(
+            (float(match["score"]) for match in option_matches), default=0.0
+        )
         score = (
             0.4 * float(item.get("confidence", 0.0))
             + 0.25 * float(onset_support)
@@ -428,6 +437,7 @@ def _build_track_reader_input(
             + 0.08 * float(bool(action_roles))
             + 0.05 * min(descriptor_count, 2)
             + 0.05 * min(selected_support, 2)
+            + 0.18 * option_score
         )
         candidates.append(
             {
@@ -443,6 +453,7 @@ def _build_track_reader_input(
                 "supporting_event_ids": list(item.get("supporting_event_ids", [])),
                 "evidence_clip_ids": evidence_clip_ids,
                 "graph_score": round(score, 4),
+                "option_matches": option_matches,
                 "score_components": {
                     "track_confidence": item.get("confidence"),
                     "onset_support": onset_support,
@@ -450,6 +461,7 @@ def _build_track_reader_input(
                     "has_action_role": bool(action_roles),
                     "descriptor_count": descriptor_count,
                     "selected_event_support": selected_support,
+                    "option_prototype_score": round(option_score, 4),
                 },
                 "fact_status": item.get("fact_status"),
                 "physical_identity_confirmed": item.get("physical_identity_confirmed"),
@@ -527,9 +539,129 @@ def _build_track_reader_input(
         "evidence_groups": evidence_groups,
         "reasoning_path": retrieval["reasoning_path"],
         "answers_used_for_retrieval": False,
-        "qa_options_used_for_retrieval": False,
+        "qa_options_used_for_retrieval": bool(qa_options),
         "persistent_graph_mutated": False,
     }
+
+
+_INSTRUMENT_PROTOTYPES = {
+    "aspirator": {
+        "terms": {"aspirator", "suction", "sucker"},
+        "positive": {"aspirator", "suction", "suck", "tube", "tubular", "fluid"},
+        "negative": {"needle", "holder", "forceps", "grasper", "clamp"},
+    },
+    "knife": {
+        "terms": {"knife", "blade", "scalpel"},
+        "positive": {"knife", "blade", "scalpel", "sharp", "cut", "incise", "separate"},
+        "negative": {"needle", "holder", "forceps", "grasper", "suction"},
+    },
+    "scissor": {
+        "terms": {"scissor", "scissors"},
+        "positive": {"scissor", "scissors", "cut", "separate", "jaw", "blades"},
+        "negative": {"needle", "holder", "suction", "tube"},
+    },
+    "needle_holder": {
+        "terms": {"needle holder", "needle-holder"},
+        "positive": {"needle", "holder", "grasp", "hold", "jaw", "forceps", "clamp"},
+        "negative": {"suction", "aspirator", "tube", "knife", "blade"},
+    },
+    "retractor": {
+        "terms": {"retractor"},
+        "positive": {"retractor", "retract", "pull", "hold", "elevate", "lift"},
+        "negative": {"needle", "suction", "knife"},
+    },
+    "forceps": {
+        "terms": {"forceps"},
+        "positive": {"forceps", "grasper", "grasp", "hold", "jaw", "clamp"},
+        "negative": {"suction", "tube", "knife", "blade"},
+    },
+    "clamp": {
+        "terms": {"clamp"},
+        "positive": {"clamp", "compress", "occlusion", "hold", "forceps", "jaw"},
+        "negative": {"suction", "knife", "blade"},
+    },
+}
+
+
+def _option_matches(
+    qa_options: Sequence[str],
+    track: GraphNode,
+    item: dict[str, Any],
+    action_roles: Sequence[str],
+) -> list[dict[str, Any]]:
+    matches = []
+    if not qa_options:
+        return matches
+    text = _track_match_text(track, item, action_roles)
+    for option in qa_options:
+        label, option_text = _option_label_text(option)
+        profile = _prototype_for_option(option_text)
+        option_tokens = _tokens(option_text)
+        lexical_hits = sorted(option_tokens & text)
+        prototype_hits = sorted(profile["positive"] & text) if profile else []
+        negative_hits = sorted(profile["negative"] & text) if profile else []
+        score = 0.0
+        if option_tokens:
+            score += 0.35 * len(lexical_hits) / len(option_tokens)
+        if profile and profile["positive"]:
+            score += 0.65 * min(len(prototype_hits), 3) / 3
+            score -= 0.2 * min(len(negative_hits), 2) / 2
+        score = max(0.0, min(1.0, score))
+        if score > 0 or lexical_hits or prototype_hits or negative_hits:
+            matches.append(
+                {
+                    "option_label": label,
+                    "option_text": option_text,
+                    "score": round(score, 4),
+                    "lexical_hits": lexical_hits,
+                    "prototype_hits": prototype_hits,
+                    "negative_hits": negative_hits,
+                }
+            )
+    matches.sort(
+        key=lambda match: (
+            -float(match["score"]),
+            str(match["option_label"]),
+            str(match["option_text"]),
+        )
+    )
+    return matches[:3]
+
+
+def _track_match_text(
+    track: GraphNode, item: dict[str, Any], action_roles: Sequence[str]
+) -> set[str]:
+    signature = item.get("appearance_signature") or {}
+    values = [
+        track.label,
+        item.get("canonical_label"),
+        item.get("canonical_instrument"),
+        item.get("appearance_family"),
+        *(item.get("surface_forms") or []),
+        *action_roles,
+    ]
+    for name in ("colors", "shapes", "materials", "appearance", "sizes", "markings"):
+        values.extend(signature.get(name, []) or [])
+    return _tokens(" ".join(str(value) for value in values if value is not None))
+
+
+def _prototype_for_option(option_text: str) -> dict[str, set[str]] | None:
+    canonical = " ".join(re.findall(r"[a-z0-9]+", option_text.lower()))
+    for profile in _INSTRUMENT_PROTOTYPES.values():
+        if any(term in canonical for term in profile["terms"]):
+            return profile
+    return None
+
+
+def _option_label_text(option: str) -> tuple[str, str]:
+    match = re.match(r"^\s*([A-Za-z0-9]+)[.):：]\s*(.*)$", str(option))
+    if match:
+        return match.group(1).upper(), match.group(2).strip()
+    return "", str(option).strip()
+
+
+def _tokens(value: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", value.lower()))
 
 
 def _track_evidence_clips(

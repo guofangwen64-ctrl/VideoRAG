@@ -49,6 +49,7 @@ def main() -> None:
     parser.add_argument("--fallback-top-segments", type=int, default=3)
     parser.add_argument("--fallback-max-clips-per-segment", type=int, default=2)
     parser.add_argument("--fallback-frames-per-clip", type=int, default=4)
+    parser.add_argument("--option-aware-tracks", action="store_true")
     parser.add_argument(
         "--fallback-min-confidence",
         choices=("low", "medium", "high"),
@@ -122,7 +123,8 @@ def main() -> None:
         "query_conditioned_fallback_enabled": bool(activity_segments),
         "instrument_identity_annotations_used": False,
         "answers_used_for_retrieval_or_reader": False,
-        "qa_options_used_only_by_reader": True,
+        "qa_options_used_only_by_reader": not args.option_aware_tracks,
+        "qa_options_used_for_track_rerank": args.option_aware_tracks,
         "candidate_aware_phase_graph": True,
     }
     (output / "run_metadata.json").write_text(
@@ -143,6 +145,7 @@ def main() -> None:
             reader_input = build_phase_instrument_reader_input(
                 graph,
                 phase,
+                qa_options=item.options if args.option_aware_tracks else None,
                 context_events=args.context_events,
                 max_tracks=args.max_tracks,
                 max_evidence_clips=args.max_evidence_clips,
@@ -230,6 +233,7 @@ def main() -> None:
                     by_segment_id[selected_segment_id],
                     verification_confidence=verification["confidence"],
                     verification_rationale=verification["rationale"],
+                    qa_options=item.options if args.option_aware_tracks else None,
                     context_events=args.context_events,
                     max_tracks=args.max_tracks,
                     max_evidence_clips=args.max_evidence_clips,
