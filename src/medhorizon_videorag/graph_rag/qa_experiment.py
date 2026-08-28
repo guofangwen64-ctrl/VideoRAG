@@ -364,6 +364,51 @@ class OpenAICompatibleGraphQA:
         reader_input: dict[str, Any],
     ) -> tuple[str, str, list[str]]:
         """Rerank unknown-identity appearance tracks with their grounded frames."""
+        payload, known_track_ids, labels = self._answer_phase_instrument_payload(
+            question, choices, reader_input, option_verifier=False
+        )
+        choice = str(payload.get("choice", "")).strip().upper()
+        if choice not in labels:
+            raise RuntimeError(
+                f"Reader returned invalid choice {choice!r}; expected one of {labels}"
+            )
+        selected_track_ids = _valid_track_ids(payload, known_track_ids)
+        return choice, str(payload.get("rationale", "")), selected_track_ids
+
+    def answer_phase_instrument_with_option_verifier(
+        self,
+        question: str,
+        choices: Sequence[str],
+        reader_input: dict[str, Any],
+    ) -> tuple[str, str, list[str], list[dict[str, Any]]]:
+        """Answer after explicitly assessing support and contradictions per option."""
+        payload, known_track_ids, labels = self._answer_phase_instrument_payload(
+            question, choices, reader_input, option_verifier=True
+        )
+        choice = str(payload.get("choice", "")).strip().upper()
+        if choice not in labels:
+            raise RuntimeError(
+                f"Reader returned invalid choice {choice!r}; expected one of {labels}"
+            )
+        selected_track_ids = _valid_track_ids(payload, known_track_ids)
+        assessments = payload.get("option_assessments", [])
+        if not isinstance(assessments, list):
+            assessments = []
+        return (
+            choice,
+            str(payload.get("rationale", "")),
+            selected_track_ids,
+            [item for item in assessments if isinstance(item, dict)],
+        )
+
+    def _answer_phase_instrument_payload(
+        self,
+        question: str,
+        choices: Sequence[str],
+        reader_input: dict[str, Any],
+        *,
+        option_verifier: bool,
+    ) -> tuple[dict[str, Any], set[str], list[str]]:
         labels = _choice_labels(choices)
         candidates = list(reader_input.get("candidate_tracks", []))
         known_track_ids = {str(item["track_id"]) for item in candidates}
@@ -384,6 +429,21 @@ class OpenAICompatibleGraphQA:
             }
             for item in candidates
         ]
+        output_schema = (
+            "Return only JSON with keys choice, selected_track_ids, rationale, and "
+            "option_assessments. choice must be one of "
+            f"{labels}; selected_track_ids must come from the catalog. "
+            "option_assessments must contain one object per answer option with keys "
+            "option_label, support, contradiction, missing_evidence, matched_track_ids, "
+            "and confidence. First assess every option, then choose the option with "
+            "the strongest visible support and weakest contradiction. "
+            if option_verifier
+            else (
+                "Return only JSON with keys choice, selected_track_ids, and rationale. "
+                f"choice must be one of {labels}; selected_track_ids must come from "
+                "the catalog. "
+            )
+        )
         prompt = (
             "You are answering which instrument is visible at the onset of a surgical "
             "phase. The graph retrieved observation-level appearance tracks and frames "
@@ -399,9 +459,9 @@ class OpenAICompatibleGraphQA:
             "to the unsized option. Option-match hints, when present, are lightweight "
             "prototype cues from option text; treat negative_hits as warnings and "
             "verify against the images before deciding. "
-            "Graph rank is only a retrieval prior. Return only JSON with keys choice, "
-            "selected_track_ids, and rationale. choice must be one of "
-            f"{labels}; selected_track_ids must come from the catalog.\n"
+            "Graph rank is only a retrieval prior. "
+            + output_schema
+            + "\n"
             f"Target phase: {reader_input['phase_label']}\n"
             f"Question: {question}\nChoices:\n"
             + "\n".join(choices)
@@ -429,23 +489,8 @@ class OpenAICompatibleGraphQA:
                         },
                     }
                 )
-        payload = self._vision_json(content, max_tokens=384)
-        choice = str(payload.get("choice", "")).strip().upper()
-        if choice not in labels:
-            raise RuntimeError(
-                f"Reader returned invalid choice {choice!r}; expected one of {labels}"
-            )
-        raw_track_ids = payload.get("selected_track_ids", [])
-        if isinstance(raw_track_ids, str):
-            raw_track_ids = [raw_track_ids]
-        if not isinstance(raw_track_ids, list):
-            raw_track_ids = []
-        selected_track_ids = []
-        for track_id in raw_track_ids:
-            value = str(track_id)
-            if value in known_track_ids and value not in selected_track_ids:
-                selected_track_ids.append(value)
-        return choice, str(payload.get("rationale", "")), selected_track_ids
+        max_tokens = 900 if option_verifier else 384
+        return self._vision_json(content, max_tokens=max_tokens), known_track_ids, labels
 
     def _text_response(self, prompt: str, *, max_tokens: int) -> str:
         response = self.client.chat.completions.create(
@@ -478,6 +523,20 @@ def _choice_labels(choices: Sequence[str]) -> list[str]:
     if not labels:
         raise ValueError("Graph QA requires multiple-choice options")
     return labels
+
+
+def _valid_track_ids(payload: dict[str, Any], known_track_ids: set[str]) -> list[str]:
+    raw_track_ids = payload.get("selected_track_ids", [])
+    if isinstance(raw_track_ids, str):
+        raw_track_ids = [raw_track_ids]
+    if not isinstance(raw_track_ids, list):
+        raw_track_ids = []
+    selected_track_ids = []
+    for track_id in raw_track_ids:
+        value = str(track_id)
+        if value in known_track_ids and value not in selected_track_ids:
+            selected_track_ids.append(value)
+    return selected_track_ids
 
 
 def _uniform_sample(items: Sequence[str], count: int) -> list[str]:

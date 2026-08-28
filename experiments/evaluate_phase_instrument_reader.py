@@ -50,6 +50,7 @@ def main() -> None:
     parser.add_argument("--fallback-max-clips-per-segment", type=int, default=2)
     parser.add_argument("--fallback-frames-per-clip", type=int, default=4)
     parser.add_argument("--option-aware-tracks", action="store_true")
+    parser.add_argument("--option-verifier", action="store_true")
     parser.add_argument(
         "--fallback-min-confidence",
         choices=("low", "medium", "high"),
@@ -125,6 +126,7 @@ def main() -> None:
         "answers_used_for_retrieval_or_reader": False,
         "qa_options_used_only_by_reader": not args.option_aware_tracks,
         "qa_options_used_for_track_rerank": args.option_aware_tracks,
+        "option_verifier_enabled": args.option_verifier,
         "candidate_aware_phase_graph": True,
     }
     (output / "run_metadata.json").write_text(
@@ -283,9 +285,22 @@ def main() -> None:
                 continue
 
         try:
-            prediction, rationale, selected_track_ids = reader.answer_phase_instrument(
-                item.question, item.options, reader_input
-            )
+            option_assessments = []
+            if args.option_verifier:
+                (
+                    prediction,
+                    rationale,
+                    selected_track_ids,
+                    option_assessments,
+                ) = reader.answer_phase_instrument_with_option_verifier(
+                    item.question, item.options, reader_input
+                )
+            else:
+                prediction, rationale, selected_track_ids = (
+                    reader.answer_phase_instrument(
+                        item.question, item.options, reader_input
+                    )
+                )
             row = _result_row(
                 item,
                 phase,
@@ -294,6 +309,7 @@ def main() -> None:
                 prediction=prediction,
                 rationale=rationale,
                 selected_track_ids=selected_track_ids,
+                option_assessments=option_assessments,
                 reader_input=reader_input,
                 phase_route=reader_input["phase_route"],
                 phase_fallback=phase_fallback,
@@ -378,6 +394,7 @@ def _result_row(
     reader_input: dict[str, Any] | None = None,
     phase_route: str | None = None,
     phase_fallback: dict[str, Any] | None = None,
+    option_assessments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(item.uid),
@@ -392,6 +409,7 @@ def _result_row(
         "correct": prediction == item.answer if prediction is not None else None,
         "rationale": rationale,
         "selected_track_ids": selected_track_ids or [],
+        "option_assessments": option_assessments or [],
         "reader_input": reader_input,
         "phase_route": phase_route,
         "phase_fallback": phase_fallback,
