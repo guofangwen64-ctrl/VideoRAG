@@ -210,22 +210,32 @@ def build_relaxed_phase_mapping_prompt(
         "video title, dataset metadata, or an expected phase order.\n\n"
         "Return ONLY one valid JSON object with this schema:\n"
         '{"phase_mappings":[{"segment_id":"open_activity:...",'
-        '"label":"exact candidate or unknown","decision":"supported|tentative|insufficient",'
+        '"phase_candidates":[{"label":"exact candidate",'
+        '"decision":"supported|tentative|contradicted|insufficient",'
         '"confidence":"high|medium|low","positive_cues":["..."],'
         '"negative_cues":["..."],"missing_evidence":["..."],'
+        '"coarse_phase":"short coarse class","basis":"brief explanation"}],'
+        '"label":"best candidate or unknown",'
         '"basis":"brief explanation"}]}\n\n'
         "Rules:\n"
         "1. Return exactly one mapping for every supplied segment_id, in order.\n"
-        "2. Use decision='supported' when distinctive visible cues point to one "
+        "2. For each segment, return up to three phase_candidates ordered by "
+        "retrieval usefulness. Include competing fine phases when the visible "
+        "activity is compatible with more than one candidate.\n"
+        "3. Use decision='supported' when distinctive visible cues point to one "
         "candidate phase. Use decision='tentative' when generic actions and local "
-        "continuity make one candidate the best retrieval hypothesis but important "
-        "evidence is missing.\n"
-        "3. Use label='unknown' only when no candidate has meaningful visible support "
-        "or when negative cues contradict the best candidate.\n"
-        "4. Generic cues such as suturing, cutting, retraction, fluid removal, or "
+        "continuity make a candidate useful for retrieval but important evidence is "
+        "missing. Use decision='contradicted' when visible evidence argues against "
+        "a tempting candidate.\n"
+        "4. Set top-level label to the best supported/tentative candidate, or "
+        "'unknown' when no candidate has meaningful visible support.\n"
+        "5. Generic cues such as suturing, cutting, retraction, fluid removal, or "
         "tool manipulation may support a tentative retrieval hypothesis, but they "
         "must be listed as generic in positive_cues or missing_evidence.\n"
-        "5. positive_cues and negative_cues may contain only evidence already stated "
+        "6. coarse_phase should be a compact visible-activity class such as "
+        "suturing, dissection, exposure, hemostasis, placement, clamping, repair, "
+        "idle, or other.\n"
+        "7. positive_cues and negative_cues may contain only evidence already stated "
         "in the activity segment. Return 1-4 concise positive_cues, 0-3 negative_cues, "
         "1-3 missing_evidence items, and a basis of at most 50 words.\n\n"
         "Candidate phases:\n- "
@@ -266,13 +276,13 @@ def normalize_strict_phase_mapping_response(
             raise ValueError(f"Phase mapping {number} uses a non-candidate label")
         decision = str(item.get("decision", "insufficient")).strip().lower()
         allowed_decisions = (
-            {"supported", "tentative", "insufficient"}
+            {"supported", "tentative", "contradicted", "insufficient"}
             if acceptance_policy == "relaxed"
             else {"supported", "insufficient"}
         )
         if decision not in allowed_decisions:
             allowed_message = (
-                "supported, tentative, or insufficient"
+                "supported, tentative, contradicted, or insufficient"
                 if acceptance_policy == "relaxed"
                 else "supported or insufficient"
             )
@@ -281,12 +291,26 @@ def normalize_strict_phase_mapping_response(
         distinctive_cues = _string_list(
             item.get("distinctive_cues") or item.get("positive_cues")
         )
+        phase_candidates = _normalize_phase_candidates(
+            item,
+            label_map,
+            acceptance_policy=acceptance_policy,
+        )
         if acceptance_policy == "relaxed":
-            accepted = (
-                requested_label != "unknown"
-                and decision in {"supported", "tentative"}
-                and confidence in {"high", "medium"}
-                and bool(distinctive_cues)
+            accepted_candidates = [
+                candidate for candidate in phase_candidates if candidate["accepted"]
+            ]
+            accepted = bool(accepted_candidates)
+            best_candidate = accepted_candidates[0] if accepted else None
+            label = (
+                str(best_candidate["label"])
+                if best_candidate is not None
+                else "unknown"
+            )
+            final_confidence = (
+                str(best_candidate["confidence"])
+                if best_candidate is not None
+                else "low"
             )
         else:
             accepted = (
@@ -295,8 +319,8 @@ def normalize_strict_phase_mapping_response(
                 and confidence in {"high", "medium"}
                 and bool(distinctive_cues)
             )
-        label = requested_label if accepted else "unknown"
-        final_confidence = confidence if accepted else "low"
+            label = requested_label if accepted else "unknown"
+            final_confidence = confidence if accepted else "low"
         normalized.append(
             {
                 "segment_id": f"sequence_phase:{number:05d}",
@@ -315,6 +339,12 @@ def normalize_strict_phase_mapping_response(
                 "basis_clip_ids": activity["basis_clip_ids"],
                 "activity_label": activity["activity_label"],
                 "observed_pattern": activity["observed_pattern"],
+                "phase_candidates": phase_candidates,
+                "coarse_phase": (
+                    phase_candidates[0]["coarse_phase"]
+                    if phase_candidates
+                    else _coarse_phase(label, distinctive_cues)
+                ),
                 "distinctive_cues": distinctive_cues,
                 "positive_cues": distinctive_cues,
                 "negative_cues": _string_list(item.get("negative_cues")),
@@ -326,6 +356,125 @@ def normalize_strict_phase_mapping_response(
             }
         )
     return normalized
+
+
+def _normalize_phase_candidates(
+    item: dict[str, Any],
+    label_map: dict[str, str],
+    *,
+    acceptance_policy: str,
+) -> list[dict[str, Any]]:
+    raw_candidates = item.get("phase_candidates")
+    if isinstance(raw_candidates, list) and raw_candidates:
+        source_candidates = [entry for entry in raw_candidates if isinstance(entry, dict)]
+    else:
+        source_candidates = [item]
+    candidates = []
+    seen: set[str] = set()
+    for rank, candidate in enumerate(source_candidates, start=1):
+        label = label_map.get(_canonical(candidate.get("label", "")))
+        if label is None or label == "unknown":
+            continue
+        canonical = _canonical(label)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        decision = str(candidate.get("decision", "insufficient")).strip().lower()
+        if decision not in {"supported", "tentative", "contradicted", "insufficient"}:
+            raise ValueError(
+                "Phase candidate decision must be supported, tentative, "
+                "contradicted, or insufficient"
+            )
+        confidence = _confidence_label(candidate.get("confidence"))
+        positive_cues = _string_list(
+            candidate.get("positive_cues") or candidate.get("distinctive_cues")
+        )
+        negative_cues = _string_list(candidate.get("negative_cues"))
+        missing_evidence = _string_list(candidate.get("missing_evidence"))
+        accepted = (
+            acceptance_policy == "relaxed"
+            and decision in {"supported", "tentative"}
+            and confidence in {"high", "medium"}
+            and bool(positive_cues)
+        )
+        score = _phase_candidate_score(
+            decision,
+            confidence,
+            positive_cues=positive_cues,
+            negative_cues=negative_cues,
+            missing_evidence=missing_evidence,
+        )
+        candidates.append(
+            {
+                "rank": rank,
+                "label": label,
+                "coarse_phase": _coarse_phase(
+                    str(candidate.get("coarse_phase") or label), positive_cues
+                ),
+                "decision": decision,
+                "confidence": confidence,
+                "confidence_score": _CONFIDENCE[confidence],
+                "score": score,
+                "accepted": accepted,
+                "positive_cues": positive_cues,
+                "negative_cues": negative_cues,
+                "missing_evidence": missing_evidence,
+                "basis": str(candidate.get("basis", "")).strip(),
+            }
+        )
+    candidates.sort(
+        key=lambda candidate: (
+            not bool(candidate["accepted"]),
+            -float(candidate["score"]),
+            int(candidate["rank"]),
+            str(candidate["label"]),
+        )
+    )
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate["rank"] = rank
+    return candidates
+
+
+def _phase_candidate_score(
+    decision: str,
+    confidence: str,
+    *,
+    positive_cues: Sequence[str],
+    negative_cues: Sequence[str],
+    missing_evidence: Sequence[str],
+) -> float:
+    decision_weight = {
+        "supported": 0.95,
+        "tentative": 0.7,
+        "insufficient": 0.25,
+        "contradicted": 0.05,
+    }[decision]
+    score = (
+        0.55 * decision_weight
+        + 0.3 * _CONFIDENCE[confidence]
+        + 0.08 * min(len(positive_cues), 3) / 3
+        - 0.1 * min(len(negative_cues), 3) / 3
+        - 0.06 * min(len(missing_evidence), 3) / 3
+    )
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def _coarse_phase(label: str, cues: Sequence[str]) -> str:
+    text = " ".join([label, *cues]).lower()
+    groups = [
+        ("idle", {"idle", "pause", "inactive", "static"}),
+        ("clamping", {"clamp", "occlusion", "compress"}),
+        ("suturing", {"sutur", "thread", "needle", "knot", "stitch"}),
+        ("dissection", {"dissect", "cut", "separate", "knife", "scissor"}),
+        ("hemostasis", {"hemost", "coagulat", "cauter", "bleed", "seal"}),
+        ("placement", {"placement", "drain", "spacer", "insert", "tube"}),
+        ("exposure", {"expos", "retract", "suspension", "identify"}),
+        ("repair", {"repair", "valvuloplasty"}),
+    ]
+    for name, triggers in groups:
+        if any(trigger in text for trigger in triggers):
+            return name
+    return "other"
 
 
 def build_sequence_phase_prompt(
@@ -478,6 +627,7 @@ def project_sequence_phases_to_events(
                 f"Sequence-level phase segment vote covers {votes[label]}/"
                 f"{len(matched)} supporting clips; sources: {', '.join(segment_ids)}."
             )
+        event_phase_candidates = _event_phase_candidates(matched)
         rows.append(
             {
                 "event_id": event.id,
@@ -487,6 +637,7 @@ def project_sequence_phases_to_events(
                     "confidence": confidence,
                     "basis": basis,
                 },
+                "phase_candidates": event_phase_candidates,
                 "instrument_hypotheses": [],
                 "sequence_phase_segment_ids": segment_ids,
                 "candidate_aware_diagnostic": True,
@@ -494,6 +645,59 @@ def project_sequence_phases_to_events(
             }
         )
     return rows
+
+
+def _event_phase_candidates(
+    matched_segments: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_label: dict[str, dict[str, Any]] = {}
+    for segment in matched_segments:
+        for candidate in segment.get("phase_candidates", []):
+            label = str(candidate.get("label", ""))
+            if not label:
+                continue
+            current = by_label.setdefault(
+                label,
+                {
+                    "label": label,
+                    "coarse_phase": candidate.get("coarse_phase"),
+                    "score": 0.0,
+                    "confidence_score": 0.0,
+                    "supporting_segment_ids": [],
+                    "positive_cues": [],
+                    "negative_cues": [],
+                    "missing_evidence": [],
+                    "decisions": [],
+                },
+            )
+            current["score"] += float(candidate.get("score", 0.0))
+            current["confidence_score"] = max(
+                float(current["confidence_score"]),
+                float(candidate.get("confidence_score", 0.0)),
+            )
+            current["supporting_segment_ids"].append(str(segment["segment_id"]))
+            current["positive_cues"].extend(candidate.get("positive_cues", []))
+            current["negative_cues"].extend(candidate.get("negative_cues", []))
+            current["missing_evidence"].extend(candidate.get("missing_evidence", []))
+            current["decisions"].append(str(candidate.get("decision", "")))
+    results = []
+    for item in by_label.values():
+        support_count = len(item["supporting_segment_ids"])
+        item["score"] = round(float(item["score"]) / max(1, support_count), 4)
+        item["supporting_segment_ids"] = list(dict.fromkeys(item["supporting_segment_ids"]))
+        item["positive_cues"] = list(dict.fromkeys(item["positive_cues"]))[:6]
+        item["negative_cues"] = list(dict.fromkeys(item["negative_cues"]))[:6]
+        item["missing_evidence"] = list(dict.fromkeys(item["missing_evidence"]))[:6]
+        item["decisions"] = list(dict.fromkeys(item["decisions"]))
+        results.append(item)
+    results.sort(
+        key=lambda item: (
+            -float(item["score"]),
+            -float(item["confidence_score"]),
+            str(item["label"]),
+        )
+    )
+    return results[:5]
 
 
 def _compact_actions(value: Any) -> list[dict[str, str]]:

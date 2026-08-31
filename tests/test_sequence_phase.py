@@ -294,6 +294,93 @@ def test_relaxed_mapping_accepts_tentative_retrieval_hypotheses() -> None:
     assert segments[1]["label"] == "unknown"
 
 
+def test_relaxed_mapping_preserves_topk_phase_candidates() -> None:
+    compact = compact_observation_sequence(_rows())
+    activities = normalize_open_activity_response(_activity_payload(), compact)
+    payload = {
+        "phase_mappings": [
+            {
+                "segment_id": "open_activity:00000",
+                "label": "Preparation",
+                "basis": "several hypotheses remain possible",
+                "phase_candidates": [
+                    {
+                        "label": "Preparation",
+                        "decision": "tentative",
+                        "confidence": "medium",
+                        "positive_cues": ["generic tool setup"],
+                        "negative_cues": [],
+                        "missing_evidence": ["specific setup landmark"],
+                        "coarse_phase": "exposure",
+                        "basis": "setup is plausible",
+                    },
+                    {
+                        "label": "Perfusion Needle Spacer Suturing",
+                        "decision": "contradicted",
+                        "confidence": "low",
+                        "positive_cues": ["thread-like material"],
+                        "negative_cues": ["no spacer or tube"],
+                        "missing_evidence": ["spacer placement"],
+                        "coarse_phase": "suturing",
+                        "basis": "thread cue is generic",
+                    },
+                ],
+            },
+            {
+                "segment_id": "open_activity:00001",
+                "label": "Perfusion Needle Spacer Suturing",
+                "basis": "thread around mesh is compatible",
+                "phase_candidates": [
+                    {
+                        "label": "Perfusion Needle Spacer Suturing",
+                        "decision": "tentative",
+                        "confidence": "medium",
+                        "positive_cues": ["thread tightened around mesh-like object"],
+                        "negative_cues": [],
+                        "missing_evidence": ["needle spacer identity"],
+                        "coarse_phase": "suturing",
+                        "basis": "best fine-grained retrieval hypothesis",
+                    },
+                    {
+                        "label": "Preparation",
+                        "decision": "insufficient",
+                        "confidence": "low",
+                        "positive_cues": [],
+                        "negative_cues": ["continued suturing"],
+                        "missing_evidence": ["setup-only activity"],
+                        "coarse_phase": "exposure",
+                        "basis": "not enough setup evidence",
+                    },
+                ],
+            },
+        ]
+    }
+
+    segments = normalize_strict_phase_mapping_response(
+        payload,
+        activities,
+        ["Preparation", "Perfusion Needle Spacer Suturing"],
+        acceptance_policy="relaxed",
+    )
+
+    assert segments[0]["label"] == "Preparation"
+    assert [item["label"] for item in segments[0]["phase_candidates"]] == [
+        "Preparation",
+        "Perfusion Needle Spacer Suturing",
+    ]
+    assert segments[0]["phase_candidates"][0]["accepted"] is True
+    assert segments[0]["phase_candidates"][1]["decision"] == "contradicted"
+    assert segments[1]["coarse_phase"] == "suturing"
+
+    rows = project_sequence_phases_to_events(_graph(), segments, source="test-model")
+    assert rows[0]["phase_hypothesis"]["label"] == "Preparation"
+    assert rows[0]["phase_candidates"][0]["label"] == "Preparation"
+    assert rows[1]["phase_hypothesis"]["label"] == (
+        "Perfusion Needle Spacer Suturing"
+    )
+    assert rows[1]["phase_candidates"][0]["coarse_phase"] == "suturing"
+
+
 def test_open_activity_basis_is_uniformly_reduced_to_five_clips() -> None:
     rows = _rows() + [
         {

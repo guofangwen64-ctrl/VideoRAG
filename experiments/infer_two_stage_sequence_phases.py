@@ -177,6 +177,23 @@ def main() -> None:
     ) as handle:
         for row in event_rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    with (output / "phase_candidate_hypotheses.jsonl").open(
+        "w", encoding="utf-8"
+    ) as handle:
+        for segment in segments:
+            for candidate in segment.get("phase_candidates", []):
+                row = {
+                    "video_id": args.video_key,
+                    "activity_segment_id": segment["activity_segment_id"],
+                    "sequence_phase_segment_id": segment["segment_id"],
+                    "start_seconds": segment["start_seconds"],
+                    "end_seconds": segment["end_seconds"],
+                    **candidate,
+                    "fact_status": "medical_hypothesis",
+                    "phase_mapping_mode": args.phase_mapping_mode,
+                    "answers_used": False,
+                }
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     if resumed_stage1:
         stage1_meta = json.loads(
             (output / "stage1_request_metadata.json").read_text(encoding="utf-8")
@@ -194,6 +211,9 @@ def main() -> None:
             "observation_count": len(observations),
             "open_activity_segment_count": len(activities),
             "phase_segment_count": len(segments),
+            "phase_candidate_count": sum(
+                len(item.get("phase_candidates", [])) for item in segments
+            ),
             "event_count": len(event_rows),
             "stage_metrics": stage_metrics,
             "ontology": ontology,
