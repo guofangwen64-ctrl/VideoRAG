@@ -56,6 +56,11 @@ def main() -> None:
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--details", required=True)
+    parser.add_argument(
+        "--print-full",
+        action="store_true",
+        help="Print the full report JSON instead of a compact summary.",
+    )
     args = parser.parse_args()
 
     run_roots = _parse_named_paths(args.run_root)
@@ -116,7 +121,32 @@ def main() -> None:
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     write_jsonl(args.details, details)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    console_report = report if args.print_full else {
+        "annotations": report["annotations"],
+        "overall": report["overall"],
+        "videos": report["videos"],
+        "missing_phases": [
+            {
+                "qa_uid": row["qa_uid"],
+                "video_id": row["video_id"],
+                "gt_phase": row["gt_phase"],
+                "temporal_evidence": row["temporal_evidence"],
+                "trace_event_count": len(row["phase_trace"]["events"]),
+            }
+            for row in report["missing_phase_traces"]
+        ],
+        "topk_not_top1": [
+            {
+                "qa_uid": row["qa_uid"],
+                "video_id": row["video_id"],
+                "gt_phase": row["gt_phase"],
+                "best_rank": row["candidate_generation"]["best_rank"],
+                "match_count": row["candidate_generation"]["match_count"],
+            }
+            for row in report["topk_not_top1"]
+        ],
+    }
+    print(json.dumps(console_report, ensure_ascii=False, indent=2))
     print(f"Report: {output}\nDetails: {args.details}")
 
 
@@ -463,12 +493,6 @@ def _tokens(value: str) -> set[str]:
         "and",
         "the",
         "phase",
-        "placement",
-        "dissection",
-        "drain",
-        "node",
-        "left",
-        "right",
     }
     return {
         token
