@@ -1,4 +1,5 @@
 from experiments.analyze_phase_candidate_generation import (
+    _build_report,
     _canonical,
     _intervals_overlap,
     _nearest_events_for_phase,
@@ -81,3 +82,39 @@ def test_summarize_counts_topk_and_top1_gap() -> None:
     assert summary["topk_not_top1"] == 1
     assert summary["candidate_rank1_hits"] == 1
     assert summary["missing_without_temporal_anchor"] == 1
+
+
+def test_build_report_keeps_heavy_trace_out_of_summary() -> None:
+    rows = [
+        {
+            "qa_uid": "1",
+            "video_id": "v",
+            "gt_phase": "Vein Dissection",
+            "temporal_evidence": {"windows": []},
+            "candidate_generation": {
+                "topk_hit": False,
+                "top1_hit": False,
+                "candidate_rank1_hit": False,
+                "best_rank": None,
+                "match_count": 0,
+                "matches": [],
+            },
+            "phase_trace": {
+                "source": "nearest_lexical_events",
+                "events": [
+                    {
+                        "event_id": "event:v:1",
+                        "time": {"start_seconds": 0, "end_seconds": 1},
+                        "label": "grasp",
+                        "supporting_clip_ids": ["c0"],
+                        "raw_observations": [{"summary": "large field"}],
+                    }
+                ],
+            },
+        }
+    ]
+
+    report = _build_report("ann.jsonl", rows, ["v"])
+
+    assert "raw_observations" not in str(report)
+    assert report["missing_phase_traces"][0]["trace_event_count"] == 1

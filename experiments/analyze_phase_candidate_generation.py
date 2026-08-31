@@ -95,25 +95,7 @@ def main() -> None:
             for item in video_questions
         )
 
-    report = {
-        "annotations": args.annotations,
-        "overall": _summarize(details),
-        "videos": {
-            video_id: _summarize(
-                [row for row in details if row["video_id"] == video_id]
-            )
-            for video_id in sorted(qa_uids)
-        },
-        "missing_phase_traces": [
-            row for row in details if not row["candidate_generation"]["topk_hit"]
-        ],
-        "topk_not_top1": [
-            row
-            for row in details
-            if row["candidate_generation"]["topk_hit"]
-            and not row["candidate_generation"]["top1_hit"]
-        ],
-    }
+    report = _build_report(args.annotations, details, sorted(qa_uids))
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -121,33 +103,35 @@ def main() -> None:
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     write_jsonl(args.details, details)
-    console_report = report if args.print_full else {
-        "annotations": report["annotations"],
-        "overall": report["overall"],
-        "videos": report["videos"],
-        "missing_phases": [
-            {
-                "qa_uid": row["qa_uid"],
-                "video_id": row["video_id"],
-                "gt_phase": row["gt_phase"],
-                "temporal_evidence": row["temporal_evidence"],
-                "trace_event_count": len(row["phase_trace"]["events"]),
-            }
-            for row in report["missing_phase_traces"]
-        ],
-        "topk_not_top1": [
-            {
-                "qa_uid": row["qa_uid"],
-                "video_id": row["video_id"],
-                "gt_phase": row["gt_phase"],
-                "best_rank": row["candidate_generation"]["best_rank"],
-                "match_count": row["candidate_generation"]["match_count"],
-            }
-            for row in report["topk_not_top1"]
-        ],
-    }
+    console_report = report if args.print_full else report
     print(json.dumps(console_report, ensure_ascii=False, indent=2))
     print(f"Report: {output}\nDetails: {args.details}")
+
+
+def _build_report(
+    annotations: str, details: list[dict[str, Any]], video_ids: list[str]
+) -> dict[str, Any]:
+    return {
+        "annotations": annotations,
+        "overall": _summarize(details),
+        "videos": {
+            video_id: _summarize(
+                [row for row in details if row["video_id"] == video_id]
+            )
+            for video_id in video_ids
+        },
+        "missing_phase_traces": [
+            _compact_report_row(row)
+            for row in details
+            if not row["candidate_generation"]["topk_hit"]
+        ],
+        "topk_not_top1": [
+            _compact_report_row(row)
+            for row in details
+            if row["candidate_generation"]["topk_hit"]
+            and not row["candidate_generation"]["top1_hit"]
+        ],
+    }
 
 
 def _load_video_index(
@@ -178,6 +162,45 @@ def _load_video_index(
         "entity_mentions": by_type.get("entity_mention", []),
         "descriptions_by_clip": descriptions_by_clip,
         "segment_nodes_by_clip": segment_nodes_by_clip,
+    }
+
+
+def _compact_report_row(row: dict[str, Any]) -> dict[str, Any]:
+    generation = row["candidate_generation"]
+    trace_events = row["phase_trace"]["events"]
+    return {
+        "qa_uid": row["qa_uid"],
+        "video_id": row["video_id"],
+        "gt_phase": row["gt_phase"],
+        "temporal_evidence": row["temporal_evidence"],
+        "topk_hit": generation["topk_hit"],
+        "top1_hit": generation["top1_hit"],
+        "candidate_rank1_hit": generation["candidate_rank1_hit"],
+        "best_rank": generation["best_rank"],
+        "match_count": generation["match_count"],
+        "matched_candidates": [
+            {
+                "rank": item.get("rank"),
+                "label": item.get("label"),
+                "segment_id": item.get("activity_segment_id"),
+                "start_seconds": item.get("start_seconds"),
+                "end_seconds": item.get("end_seconds"),
+                "decision": item.get("decision"),
+                "accepted": item.get("accepted"),
+            }
+            for item in generation["matches"][:3]
+        ],
+        "trace_source": row["phase_trace"]["source"],
+        "trace_event_count": len(trace_events),
+        "trace_event_summaries": [
+            {
+                "event_id": item.get("event_id"),
+                "time": item.get("time"),
+                "label": item.get("label"),
+                "supporting_clip_ids": list(item.get("supporting_clip_ids") or [])[:5],
+            }
+            for item in trace_events[:3]
+        ],
     }
 
 
