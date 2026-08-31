@@ -117,7 +117,11 @@ def test_build_report_keeps_heavy_trace_out_of_summary() -> None:
     report = _build_report("ann.jsonl", rows, ["v"])
 
     assert "raw_observations" not in str(report)
-    assert report["missing_phase_traces"][0]["trace_event_count"] == 1
-    assert report["missing_phase_traces"][0]["trace_event_summaries"] == [
-        "event:v:1 0.0-1.0s grasp clips=c0"
+    assert report["missing_phase_traces"] == [
+        (
+            "v#1 Vein Dissection | temporal=unresolved:none | "
+            "topk=False top1=False best_rank=None matches=none | "
+            "trace=nearest_lexical_events events=1: "
+            "event:v:1 0.0-1.0s grasp clips=c0"
+        )
     ]

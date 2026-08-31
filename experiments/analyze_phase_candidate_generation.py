@@ -111,22 +111,24 @@ def main() -> None:
 def _build_report(
     annotations: str, details: list[dict[str, Any]], video_ids: list[str]
 ) -> dict[str, Any]:
+    overall = _summarize(details)
     return {
         "annotations": annotations,
-        "overall": _summarize(details),
-        "videos": {
-            video_id: _summarize(
-                [row for row in details if row["video_id"] == video_id]
+        "overall": _summary_line(overall),
+        "videos": [
+            _summary_line(
+                _summarize([row for row in details if row["video_id"] == video_id]),
+                prefix=video_id,
             )
             for video_id in video_ids
-        },
+        ],
         "missing_phase_traces": [
-            _compact_report_row(row)
+            _compact_report_line(row)
             for row in details
             if not row["candidate_generation"]["topk_hit"]
         ],
         "topk_not_top1": [
-            _compact_report_row(row)
+            _compact_report_line(row)
             for row in details
             if row["candidate_generation"]["topk_hit"]
             and not row["candidate_generation"]["top1_hit"]
@@ -163,6 +165,33 @@ def _load_video_index(
         "descriptions_by_clip": descriptions_by_clip,
         "segment_nodes_by_clip": segment_nodes_by_clip,
     }
+
+
+def _summary_line(summary: dict[str, Any], prefix: str | None = None) -> str:
+    head = f"{prefix}: " if prefix else ""
+    return (
+        f"{head}q={summary['questions']} "
+        f"topk={summary['candidate_topk_hits']}/{summary['questions']} "
+        f"top1={summary['candidate_top1_hits']}/{summary['questions']} "
+        f"rank1={summary['candidate_rank1_hits']}/{summary['questions']} "
+        f"topk_not_top1={summary['topk_not_top1']} "
+        f"anchors={summary['temporal_anchor_available']} "
+        f"missing={'; '.join(summary['missing_phases']) or 'none'}"
+    )
+
+
+def _compact_report_line(row: dict[str, Any]) -> str:
+    generation = row["candidate_generation"]
+    events = "; ".join(_event_summary(item) for item in row["phase_trace"]["events"][:2])
+    matches = "; ".join(_candidate_summary(item) for item in generation["matches"][:2])
+    return (
+        f"{row['video_id']}#{row['qa_uid']} {row['gt_phase']} | "
+        f"temporal={_compact_temporal(row['temporal_evidence'])} | "
+        f"topk={generation['topk_hit']} top1={generation['top1_hit']} "
+        f"best_rank={generation['best_rank']} matches={matches or 'none'} | "
+        f"trace={row['phase_trace']['source']} events={len(row['phase_trace']['events'])}: "
+        f"{events or 'none'}"
+    )
 
 
 def _compact_report_row(row: dict[str, Any]) -> dict[str, Any]:
