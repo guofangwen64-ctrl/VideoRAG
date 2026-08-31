@@ -58,6 +58,7 @@ def test_summarize_counts_topk_and_top1_gap() -> None:
             "candidate_generation": {
                 "topk_hit": True,
                 "top1_hit": False,
+                "candidate_rank1_hit": True,
                 "best_rank": 2,
             },
             "temporal_evidence": {"windows": [{"start_seconds": 0, "end_seconds": 1}]},
@@ -67,6 +68,7 @@ def test_summarize_counts_topk_and_top1_gap() -> None:
             "candidate_generation": {
                 "topk_hit": False,
                 "top1_hit": False,
+                "candidate_rank1_hit": False,
                 "best_rank": None,
             },
             "temporal_evidence": {"windows": []},
@@ -77,4 +79,5 @@ def test_summarize_counts_topk_and_top1_gap() -> None:
 
     assert summary["candidate_topk_recall"] == 0.5
     assert summary["topk_not_top1"] == 1
+    assert summary["candidate_rank1_hits"] == 1
     assert summary["missing_without_temporal_anchor"] == 1

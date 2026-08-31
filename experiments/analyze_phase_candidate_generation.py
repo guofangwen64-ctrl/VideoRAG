@@ -199,7 +199,15 @@ def _diagnose_question(
             float(item.get("start_seconds") or 0.0),
         ),
     )
-    top1 = [item for item in matching_candidates if int(item.get("rank") or 999) == 1]
+    rank1_candidates = [
+        item for item in matching_candidates if int(item.get("rank") or 999) == 1
+    ]
+    primary_segments = [
+        item
+        for item in index["segments"]
+        if _canonical(str(item.get("label") or "")) == phase_key
+        and bool(item.get("mapping_accepted"))
+    ]
     windows = recovered_evidence.get("windows") or []
     trace_source = "temporal_anchor" if windows else "nearest_lexical_events"
     trace_events = (
@@ -224,11 +232,13 @@ def _diagnose_question(
         },
         "candidate_generation": {
             "topk_hit": bool(matching_candidates),
-            "top1_hit": bool(top1),
+            "top1_hit": bool(primary_segments),
+            "candidate_rank1_hit": bool(rank1_candidates),
             "best_rank": int(matching_candidates[0].get("rank"))
             if matching_candidates
             else None,
             "match_count": len(matching_candidates),
+            "primary_segments": [_compact_segment(item) for item in primary_segments],
             "matches": [_compact_candidate(item) for item in matching_candidates[:5]],
             "global_top_candidates": [
                 _compact_candidate(item)
@@ -328,6 +338,20 @@ def _compact_candidate(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_segment(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "segment_id": item.get("segment_id"),
+        "label": item.get("label"),
+        "coarse_phase": item.get("coarse_phase"),
+        "mapping_accepted": item.get("mapping_accepted"),
+        "acceptance_policy": item.get("acceptance_policy"),
+        "start_seconds": item.get("start_seconds"),
+        "end_seconds": item.get("end_seconds"),
+        "confidence": item.get("confidence"),
+        "basis": item.get("basis"),
+    }
+
+
 def _compact_action(node: dict[str, Any]) -> dict[str, Any]:
     metadata = node.get("metadata") or {}
     span = _node_span(node)
@@ -390,6 +414,9 @@ def _sample_frame_paths(node: dict[str, Any]) -> list[str]:
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     topk_hits = [row for row in rows if row["candidate_generation"]["topk_hit"]]
     top1_hits = [row for row in rows if row["candidate_generation"]["top1_hit"]]
+    rank1_hits = [
+        row for row in rows if row["candidate_generation"]["candidate_rank1_hit"]
+    ]
     anchor_rows = [row for row in rows if row["temporal_evidence"]["windows"]]
     missing = [row for row in rows if not row["candidate_generation"]["topk_hit"]]
     return {
@@ -398,6 +425,8 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "candidate_topk_recall": len(topk_hits) / len(rows) if rows else None,
         "candidate_top1_hits": len(top1_hits),
         "candidate_top1_recall": len(top1_hits) / len(rows) if rows else None,
+        "candidate_rank1_hits": len(rank1_hits),
+        "candidate_rank1_recall": len(rank1_hits) / len(rows) if rows else None,
         "topk_not_top1": len(topk_hits) - len(top1_hits),
         "temporal_anchor_available": len(anchor_rows),
         "missing_with_temporal_anchor": sum(
