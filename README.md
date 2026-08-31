@@ -254,6 +254,8 @@ OPENAI_API_KEY=EMPTY python experiments/evaluate_phase_instrument_reader.py \
 
 最新 v3 投影保留来源阶段和边界，按实际相交区间建立阶段与事件的多对多支持关系；不再用整个事件投票覆盖短阶段或 unknown。旧阶段文件可离线重投影到新的 observation v3 图，无需模型推断。命令、兼容边界和验收口径见 [sequence phase 相交投影说明](docs/sequence_phase_projection_v3.md)。
 
+阶段候选文件可通过 `evaluate_phase_instrument_reader.py --phase-candidates ...` 显式接入检索、验证和 Reader；旧默认路线不变。新路线提供稳定 candidate ID、逐题流转/反证日志、离线准备模式与统一指标，见 [候选传递与指标 v3](docs/phase_candidate_flow_v3.md)。
+
 ```bash
 python experiments/infer_sequence_phase_hypotheses.py \
   --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \

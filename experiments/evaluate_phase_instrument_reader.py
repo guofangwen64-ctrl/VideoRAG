@@ -56,7 +56,38 @@ def main() -> None:
         choices=("low", "medium", "high"),
         default="low",
     )
+    parser.add_argument(
+        "--phase-candidates",
+        help="Opt in to the v3 candidate-file route (JSONL or source sequence JSON)",
+    )
+    parser.add_argument("--candidate-top-k", type=int, default=3)
+    parser.add_argument(
+        "--candidate-dry-run",
+        action="store_true",
+        help="Prepare and audit candidate packets without a verifier or Reader call",
+    )
+    parser.add_argument(
+        "--candidate-min-confidence",
+        choices=("low", "medium", "high"),
+        default="medium",
+    )
+    parser.add_argument(
+        "--gold-evidence",
+        help="Reviewed evaluation-only phase/evidence windows; never sent to inference",
+    )
+    parser.add_argument("--evidence-recall-threshold", type=float, default=0.5)
     args = parser.parse_args()
+    if args.phase_candidates:
+        from medhorizon_videorag.graph_rag.phase_candidate_experiment import (
+            run_candidate_cli,
+        )
+
+        run_candidate_cli(args)
+        return
+    if args.candidate_dry_run or args.gold_evidence:
+        parser.error(
+            "--candidate-dry-run and --gold-evidence require --phase-candidates"
+        )
 
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=False)
