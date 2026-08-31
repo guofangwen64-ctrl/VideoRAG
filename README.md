@@ -141,7 +141,9 @@ AGICTO 当前对 HTTP 500 不做重试：该 clip 立即写入 `errors.jsonl` �
 
 生成完成后，可用 `experiments/compare_vgent_descriptions.py` 将该子集与已有完整描述 JSONL 配对，输出规则违规、医学推断、uncertainty、耗时以及逐 clip 摘要。
 
-## v2.1 可追溯证据图
+## v3 可追溯证据图（兼容 v2.1 输入）
+
+v3 在 v2.1 结构上改进 clip 内 mention 绑定：唯一精确匹配优先，再使用中心词和外观属性消歧；歧义或证据不足时保留独立动作论元，不按同类 concept 取第一项。旧图保持可读，CLI 参数不变。绑定元数据、四视频重建验收和第二层兼容注意事项见 [v3 mention 绑定说明](docs/observation_graph_v3_mention_binding.md)。
 
 证据图 builder 只使用 `observed_facts` 建图；`medical_inferences` 会保留在原始 clip metadata 中，但不会成为图事实。v2 将 action 映射到有限观察词表，将复合实体描述拆为基础 entity concept 与 mention attributes，并通过显式动作转移表支持 `pass_through -> pull -> tighten` 等连续事件。v2.1 额外为 event 计算可解释的结构支持分数，并选择最多 3 个代表 clip。原始 clip 节点不会被 temporal merge 覆盖或删除。实体跨 clip 只标记为低置信 `possible_continuation`，不会直接断言是同一物理实体。
 
@@ -149,7 +151,7 @@ AGICTO 当前对 HTTP 500 不做重试：该 clip 立即写入 `errors.jsonl` �
 python experiments/build_evidence_graph.py \
   --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \
   --manifest artifacts/vgent_baseline/<cache>/video_manifests/<video>.json \
-  --output-dir artifacts/graph_rag/<video>/evidence_graph_v2_1
+  --output-dir artifacts/graph_rag/<video>/evidence_graph_v3
 ```
 
 输出包括：

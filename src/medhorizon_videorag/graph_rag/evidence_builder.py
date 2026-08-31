@@ -9,10 +9,11 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
+from .mention_binding import MENTION_BINDING_VERSION, bind_mention
 from .schemas import EvidenceInterval, GraphEdge, GraphNode, VideoEvidenceGraph
 
-BUILDER_VERSION = "observation-evidence-graph-v2.1"
-GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v2.1"
+BUILDER_VERSION = "observation-evidence-graph-v3"
+GRAPH_SCHEMA_VERSION = "medical-video-evidence-graph-v3"
 EVENT_SUPPORT_VERSION = "event-structural-support-v1"
 REPRESENTATIVE_EVIDENCE_VERSION = "event-representative-evidence-v1"
 
@@ -320,6 +321,7 @@ class NormalizedMention:
     category: str
     source_field: str
     attributes: dict[str, Any] = field(default_factory=dict)
+    binding: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -332,6 +334,8 @@ class NormalizedAction:
     original_action: str
     subject_mention_id: str
     target_mention_id: str
+    subject_binding: dict[str, Any] = field(default_factory=dict)
+    target_binding: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -618,6 +622,7 @@ def build_evidence_graph(
                         "source_field": mention.source_field,
                         "attributes": mention.attributes,
                         "clip_id": clip.clip_id,
+                        "argument_binding": mention.binding,
                     },
                 )
             )
@@ -645,6 +650,8 @@ def build_evidence_graph(
                     metadata={
                         "original_action": action.original_action,
                         "clip_id": clip.clip_id,
+                        "subject_binding": action.subject_binding,
+                        "target_binding": action.target_binding,
                     },
                 )
             )
@@ -659,10 +666,18 @@ def build_evidence_graph(
                         action.id, action_concept_id, "instance_of", [evidence], 0.98
                     ),
                     GraphEdge(
-                        action.id, action.subject_mention_id, "has_subject", [evidence]
+                        action.id,
+                        action.subject_mention_id,
+                        "has_subject",
+                        [evidence],
+                        metadata={"argument_binding": action.subject_binding},
                     ),
                     GraphEdge(
-                        action.id, action.target_mention_id, "acts_on", [evidence]
+                        action.id,
+                        action.target_mention_id,
+                        "acts_on",
+                        [evidence],
+                        metadata={"argument_binding": action.target_binding},
                     ),
                 ]
             )
@@ -775,6 +790,7 @@ def build_evidence_graph(
         schema_version=GRAPH_SCHEMA_VERSION,
         metadata={
             "builder_version": BUILDER_VERSION,
+            "mention_binding_version": MENTION_BINDING_VERSION,
             "action_vocabulary": sorted(ACTION_VOCABULARY),
             "entity_vocabulary": sorted(ENTITY_VOCABULARY),
             "source_clip_count": len(clips),
@@ -813,11 +829,13 @@ def _normalize_description_row(
     description = row["description"]
     observed = description["observed_facts"]
     mentions: list[NormalizedMention] = []
-    mentions_by_key: dict[tuple[str, str], list[NormalizedMention]] = defaultdict(list)
     sequence = 0
 
     def add_mention(
-        surface: str, source_field: str, category_hint: str
+        surface: str,
+        source_field: str,
+        category_hint: str,
+        binding: dict[str, Any] | None = None,
     ) -> NormalizedMention:
         nonlocal sequence
         canonical, category, attributes = normalize_entity(
@@ -830,10 +848,10 @@ def _normalize_description_row(
             category=category,
             source_field=source_field,
             attributes=attributes,
+            binding=binding or {},
         )
         sequence += 1
         mentions.append(mention)
-        mentions_by_key[(category, canonical)].append(mention)
         return mention
 
     for field_name, category_hint in (
@@ -844,19 +862,27 @@ def _normalize_description_row(
         for surface in observed[field_name]:
             add_mention(str(surface), field_name, category_hint)
 
-    def argument_mention(surface: str, role: str) -> NormalizedMention:
-        canonical, category, _ = normalize_entity(surface)
-        existing = mentions_by_key.get((category, canonical))
-        if existing:
-            return existing[0]
-        return add_mention(surface, role, category)
+    visible_mentions = {mention.id: mention for mention in mentions}
+    candidates = [
+        (mention.id, mention.surface) for mention in visible_mentions.values()
+    ]
+
+    def argument_mention(
+        surface: str, role: str
+    ) -> tuple[NormalizedMention, dict[str, Any]]:
+        selected, binding = bind_mention(surface, candidates)
+        if selected is not None:
+            return visible_mentions[selected], binding
+        _, category, _ = normalize_entity(surface)
+        mention = add_mention(surface, role, category, binding)
+        return mention, binding
 
     actions: list[NormalizedAction] = []
     for action_index, action in enumerate(observed["actions"]):
-        subject = argument_mention(
+        subject, subject_binding = argument_mention(
             str(action.get("subject", "unidentified object")), "action_subject"
         )
-        target = argument_mention(
+        target, target_binding = argument_mention(
             str(action.get("target", "unidentified object")), "action_target"
         )
         original = str(action.get("action", "unspecified action"))
@@ -868,6 +894,8 @@ def _normalize_description_row(
                     original_action=original,
                     subject_mention_id=subject.id,
                     target_mention_id=target.id,
+                    subject_binding=subject_binding,
+                    target_binding=target_binding,
                 )
             )
 
@@ -957,8 +985,12 @@ def _clip_specificity(clip: NormalizedClip) -> tuple[float, float]:
     argument_count = 2 * len(clip.actions)
     informative_arguments = sum(
         mention_by_id[mention_id].canonical not in _MERGE_STOP_CONCEPTS
+        and (not binding or binding.get("status") == "resolved")
         for action in clip.actions
-        for mention_id in (action.subject_mention_id, action.target_mention_id)
+        for mention_id, binding in (
+            (action.subject_mention_id, action.subject_binding),
+            (action.target_mention_id, action.target_binding),
+        )
     )
     argument_specificity = (
         informative_arguments / argument_count if argument_count else 0.0
@@ -1175,6 +1207,14 @@ def _shared_action_roles(
                     second_action.target_mention_id,
                 ),
             ):
+                if any(
+                    binding and binding.get("status") != "resolved"
+                    for binding in (
+                        getattr(first_action, f"{role}_binding"),
+                        getattr(second_action, f"{role}_binding"),
+                    )
+                ):
+                    continue
                 first_canonical = first_mentions[first_id].canonical
                 second_canonical = second_mentions[second_id].canonical
                 if (
@@ -1213,8 +1253,12 @@ def _continuation_edges(
     )
     current_mentions: dict[tuple[str, str], list[NormalizedMention]] = defaultdict(list)
     for mention in previous.mentions:
+        if mention.binding:
+            continue
         previous_mentions[(mention.category, mention.canonical)].append(mention)
     for mention in current.mentions:
+        if mention.binding:
+            continue
         current_mentions[(mention.category, mention.canonical)].append(mention)
     for key in sorted(previous_mentions.keys() & current_mentions.keys()):
         if key[1] in _MERGE_STOP_CONCEPTS:
@@ -1232,8 +1276,18 @@ def _continuation_edges(
     previous_actions = action_by_clip[previous.clip_id]
     current_actions = action_by_clip[current.clip_id]
     for left in previous_actions:
+        if any(
+            b and b.get("status") != "resolved"
+            for b in (left.subject_binding, left.target_binding)
+        ):
+            continue
         left_signature = _action_signature(left, mention_by_id)
         for right in current_actions:
+            if any(
+                b and b.get("status") != "resolved"
+                for b in (right.subject_binding, right.target_binding)
+            ):
+                continue
             if left_signature == _action_signature(right, mention_by_id):
                 edges.append(
                     GraphEdge(
@@ -1299,6 +1353,23 @@ def _build_report(
         "builder_version": BUILDER_VERSION,
         "video_id": graph.video_id,
         "schema_version": graph.schema_version,
+        "mention_binding_version": MENTION_BINDING_VERSION,
+        "argument_binding_status_counts": dict(
+            Counter(
+                binding["status"]
+                for clip in clips
+                for action in clip.actions
+                for binding in (action.subject_binding, action.target_binding)
+            )
+        ),
+        "argument_binding_method_counts": dict(
+            Counter(
+                binding["method"]
+                for clip in clips
+                for action in clip.actions
+                for binding in (action.subject_binding, action.target_binding)
+            )
+        ),
         "source_clip_count": len(clips),
         "node_count": len(graph.nodes),
         "edge_count": len(graph.edges),
