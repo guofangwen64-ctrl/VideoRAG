@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from .phase_projection import project_intersections
 from .schemas import GraphNode, VideoEvidenceGraph
 
 SEQUENCE_PHASE_VERSION = "observation-sequence-phase-v1"
@@ -366,7 +366,9 @@ def _normalize_phase_candidates(
 ) -> list[dict[str, Any]]:
     raw_candidates = item.get("phase_candidates")
     if isinstance(raw_candidates, list) and raw_candidates:
-        source_candidates = [entry for entry in raw_candidates if isinstance(entry, dict)]
+        source_candidates = [
+            entry for entry in raw_candidates if isinstance(entry, dict)
+        ]
     else:
         source_candidates = [item]
     candidates = []
@@ -585,64 +587,11 @@ def project_sequence_phases_to_events(
     *,
     source: str,
 ) -> list[dict[str, Any]]:
-    segment_by_clip = {
-        clip_id: segment
-        for segment in segments
-        for clip_id in segment["supporting_clip_ids"]
-    }
-    events = sorted(
-        (node for node in graph.nodes if node.node_type == "temporal_event"),
-        key=_node_start,
-    )
-    rows = []
-    for event in events:
-        clip_ids = [
-            str(value) for value in event.metadata.get("supporting_clip_ids", [])
-        ]
-        matched = [
-            segment_by_clip[item] for item in clip_ids if item in segment_by_clip
-        ]
-        if not matched:
-            label = "unknown"
-            confidence = "low"
-            basis = "No supporting clip was covered by the sequence segmentation."
-            segment_ids: list[str] = []
-        else:
-            named = [item for item in matched if item["label"] != "unknown"]
-            candidates = named or matched
-            votes = Counter(str(item["label"]) for item in candidates)
-            label = min(votes, key=lambda value: (-votes[value], value))
-            winning = [item for item in candidates if item["label"] == label]
-            confidence = min(
-                (str(item["confidence"]) for item in winning),
-                key=lambda value: _CONFIDENCE[value],
-            )
-            coverage = votes[label] / len(matched)
-            if label != "unknown" and coverage < 0.5:
-                confidence = "low"
-            segment_ids = list(
-                dict.fromkeys(str(item["segment_id"]) for item in winning)
-            )
-            basis = (
-                f"Sequence-level phase segment vote covers {votes[label]}/"
-                f"{len(matched)} supporting clips; sources: {', '.join(segment_ids)}."
-            )
-        event_phase_candidates = _event_phase_candidates(matched)
-        rows.append(
-            {
-                "event_id": event.id,
-                "source": source,
-                "phase_hypothesis": {
-                    "label": label,
-                    "confidence": confidence,
-                    "basis": basis,
-                },
-                "phase_candidates": event_phase_candidates,
-                "instrument_hypotheses": [],
-                "sequence_phase_segment_ids": segment_ids,
-                "candidate_aware_diagnostic": True,
-                "fact_status": "medical_hypothesis",
-            }
+    rows = project_intersections(graph, segments, source=source)
+    segment_by_id = {segment["segment_id"]: segment for segment in segments}
+    for row in rows:
+        row["phase_candidates"] = _event_phase_candidates(
+            [segment_by_id[sid] for sid in row["sequence_phase_segment_ids"]]
         )
     return rows
 
@@ -684,7 +633,9 @@ def _event_phase_candidates(
     for item in by_label.values():
         support_count = len(item["supporting_segment_ids"])
         item["score"] = round(float(item["score"]) / max(1, support_count), 4)
-        item["supporting_segment_ids"] = list(dict.fromkeys(item["supporting_segment_ids"]))
+        item["supporting_segment_ids"] = list(
+            dict.fromkeys(item["supporting_segment_ids"])
+        )
         item["positive_cues"] = list(dict.fromkeys(item["positive_cues"]))[:6]
         item["negative_cues"] = list(dict.fromkeys(item["negative_cues"]))[:6]
         item["missing_evidence"] = list(dict.fromkeys(item["missing_evidence"]))[:6]

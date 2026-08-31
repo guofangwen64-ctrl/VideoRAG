@@ -133,7 +133,7 @@ def test_project_sequence_phases_to_temporal_events() -> None:
     assert rows[0]["instrument_hypotheses"] == []
 
 
-def test_named_phase_is_not_outvoted_by_unknown_within_coarse_event() -> None:
+def test_mixed_event_does_not_overwrite_unknown_with_named_phase() -> None:
     compact = compact_observation_sequence(_rows())
     payload = {
         "phase_segments": [
@@ -165,14 +165,12 @@ def test_named_phase_is_not_outvoted_by_unknown_within_coarse_event() -> None:
     }
     segments = normalize_sequence_phase_response(payload, compact, ["Preparation"])
     rows = project_sequence_phases_to_events(_graph(), segments, source="test-model")
-    assert rows[0]["phase_hypothesis"] == {
-        "label": "Preparation",
-        "confidence": "medium",
-        "basis": (
-            "Sequence-level phase segment vote covers 1/2 supporting clips; "
-            "sources: sequence_phase:00001."
-        ),
-    }
+    assert rows[0]["phase_hypothesis"]["label"] == "unknown"
+    assert [item["label"] for item in rows[0]["phase_overlaps"]] == [
+        "unknown",
+        "Preparation",
+    ]
+    assert [item["overlap_seconds"] for item in rows[0]["phase_overlaps"]] == [64, 64]
 
 
 def _activity_payload() -> dict:
@@ -375,9 +373,7 @@ def test_relaxed_mapping_preserves_topk_phase_candidates() -> None:
     rows = project_sequence_phases_to_events(_graph(), segments, source="test-model")
     assert rows[0]["phase_hypothesis"]["label"] == "Preparation"
     assert rows[0]["phase_candidates"][0]["label"] == "Preparation"
-    assert rows[1]["phase_hypothesis"]["label"] == (
-        "Perfusion Needle Spacer Suturing"
-    )
+    assert rows[1]["phase_hypothesis"]["label"] == ("Perfusion Needle Spacer Suturing")
     assert rows[1]["phase_candidates"][0]["coarse_phase"] == "suturing"
 
 

@@ -396,6 +396,33 @@ def _build_track_reader_input(
     event_order = {
         event_id: index for index, event_id in enumerate(retrieval["event_ids"])
     }
+    allowed_clips = None
+    roles_by_mention: dict[str, set[str]] = {}
+    if retrieval.get("phase_scoped_evidence"):
+        # Without per-frame timestamps, only wholly contained clips are safe
+        # Reader inputs. A partial clip remains interval evidence in the graph.
+        allowed_clips = {
+            cid
+            for cid, clip in clips.items()
+            if all(
+                any(
+                    window["start_seconds"] <= interval.start_seconds
+                    and interval.end_seconds <= window["end_seconds"]
+                    and window.get("metadata", {}).get("clip_id", cid) == cid
+                    for window in retrieval["evidence"]
+                )
+                for interval in clip.evidence
+            )
+        }
+        for edge in graph.edges:
+            if edge.relation not in {"has_subject", "acts_on"}:
+                continue
+            action = node_by_id[edge.source]
+            if action.node_type != "action_event":
+                continue
+            role = "subject" if edge.relation == "has_subject" else "target"
+            predicate = "_".join(re.findall(r"[a-z0-9]+", action.label.lower()))
+            roles_by_mention.setdefault(edge.target, set()).add(f"{role}:{predicate}")
     candidates = []
     for item in retrieval["instruments"]:
         track = node_by_id[str(item["track_id"])]
@@ -404,6 +431,33 @@ def _build_track_reader_input(
             for detection in track.metadata.get("detections", [])
             if str(detection.get("event_id")) in event_order
         ]
+        if allowed_clips is not None:
+            detections = [
+                {
+                    **d,
+                    "mention_ids": [
+                        mid
+                        for mid in d.get("mention_ids", [])
+                        if mid in node_by_id
+                        and node_by_id[mid].metadata.get("clip_id") in allowed_clips
+                    ],
+                }
+                for d in detections
+            ]
+            detections = [d for d in detections if d["mention_ids"]]
+            detections = [
+                {
+                    **d,
+                    "action_roles": sorted(
+                        {
+                            role
+                            for mid in d["mention_ids"]
+                            for role in roles_by_mention.get(mid, set())
+                        }
+                    ),
+                }
+                for d in detections
+            ]
         action_roles = sorted(
             {
                 str(role)
@@ -414,6 +468,10 @@ def _build_track_reader_input(
         evidence_clip_ids = _track_evidence_clips(
             track, detections, node_by_id, clips, event_order
         )
+        if allowed_clips is not None:
+            evidence_clip_ids = [
+                cid for cid in evidence_clip_ids if cid in allowed_clips
+            ]
         if not evidence_clip_ids:
             continue
         signature = item.get("appearance_signature") or {}

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .phase_projection import append_sequence_phases, intersect_evidence
 from .schemas import EvidenceInterval, GraphEdge, GraphNode, VideoEvidenceGraph
 
 SEMANTIC_LAYER_VERSION = "phase-boundary-instrument-track-v1"
@@ -83,87 +84,96 @@ def augment_with_semantic_hypotheses(
 
     nodes = list(graph.nodes)
     edges = list(graph.edges)
-    phase_event_membership: dict[str, str] = {}
-    phase_runs = _phase_runs(events, row_by_event)
-    for phase_index, run in enumerate(phase_runs):
-        phase_id = f"phase_hypothesis:{graph.video_id}:{phase_index:05d}"
-        event_ids = [item[0].id for item in run]
-        label = run[0][1]
-        confidence = _mean(item[2] for item in run)
-        evidence = _dedupe_intervals(
-            interval for event, _, _, _ in run for interval in event.evidence
+    phase_event_membership: dict[str, dict[str, list[EvidenceInterval]]] = {}
+    interval_projection = any("phase_projection_version" in row for row in hypotheses)
+    if interval_projection:
+        phase_event_membership, phase_count = append_sequence_phases(
+            graph, hypotheses, nodes, edges
         )
-        nodes.append(
-            GraphNode(
-                phase_id,
-                graph.video_id,
-                "phase_hypothesis",
-                label,
-                evidence,
-                confidence=confidence,
-                metadata={
-                    "canonical_label": _canonical_label(label),
-                    "supporting_event_ids": event_ids,
-                    "bases": [item[3] for item in run if item[3]],
-                    "hypothesis_source": _sources(run, row_by_event),
-                    "derived": True,
-                    "fact_status": "medical_hypothesis",
-                    "semantic_layer_version": SEMANTIC_LAYER_VERSION,
-                },
+    else:
+        phase_runs = _phase_runs(events, row_by_event)
+        for phase_index, run in enumerate(phase_runs):
+            phase_id = f"phase_hypothesis:{graph.video_id}:{phase_index:05d}"
+            event_ids = [item[0].id for item in run]
+            label = run[0][1]
+            confidence = _mean(item[2] for item in run)
+            evidence = _dedupe_intervals(
+                interval for event, _, _, _ in run for interval in event.evidence
             )
-        )
-        for event, _, event_confidence, basis in run:
-            phase_event_membership[event.id] = phase_id
-            edges.append(
-                GraphEdge(
-                    phase_id,
-                    event.id,
-                    "derived_from",
-                    event.evidence,
-                    event_confidence,
-                    {"basis": basis},
-                )
-            )
-        for kind, event in (("onset", run[0][0]), ("offset", run[-1][0])):
-            boundary_id = f"phase_boundary:{graph.video_id}:{phase_index:05d}:{kind}"
-            timestamp = _node_start(event) if kind == "onset" else _node_end(event)
             nodes.append(
                 GraphNode(
-                    boundary_id,
+                    phase_id,
                     graph.video_id,
-                    "phase_boundary",
-                    f"{kind} of {label}",
-                    list(event.evidence),
+                    "phase_hypothesis",
+                    label,
+                    evidence,
                     confidence=confidence,
                     metadata={
-                        "boundary_kind": kind,
-                        "timestamp_seconds": timestamp,
-                        "phase_hypothesis_id": phase_id,
-                        "grounding_event_id": event.id,
+                        "canonical_label": _canonical_label(label),
+                        "supporting_event_ids": event_ids,
+                        "bases": [item[3] for item in run if item[3]],
+                        "hypothesis_source": _sources(run, row_by_event),
                         "derived": True,
                         "fact_status": "medical_hypothesis",
+                        "semantic_layer_version": SEMANTIC_LAYER_VERSION,
                     },
                 )
             )
-            edges.extend(
-                [
+            for event, _, event_confidence, basis in run:
+                phase_event_membership[event.id] = {phase_id: list(event.evidence)}
+                edges.append(
                     GraphEdge(
                         phase_id,
-                        boundary_id,
-                        "has_boundary",
-                        list(event.evidence),
-                        confidence,
-                        {"boundary_kind": kind},
-                    ),
-                    GraphEdge(
-                        boundary_id,
                         event.id,
-                        "grounded_by",
+                        "derived_from",
+                        event.evidence,
+                        event_confidence,
+                        {"basis": basis},
+                    )
+                )
+            for kind, event in (("onset", run[0][0]), ("offset", run[-1][0])):
+                boundary_id = (
+                    f"phase_boundary:{graph.video_id}:{phase_index:05d}:{kind}"
+                )
+                timestamp = _node_start(event) if kind == "onset" else _node_end(event)
+                nodes.append(
+                    GraphNode(
+                        boundary_id,
+                        graph.video_id,
+                        "phase_boundary",
+                        f"{kind} of {label}",
                         list(event.evidence),
-                        confidence,
-                    ),
-                ]
-            )
+                        confidence=confidence,
+                        metadata={
+                            "boundary_kind": kind,
+                            "timestamp_seconds": timestamp,
+                            "phase_hypothesis_id": phase_id,
+                            "grounding_event_id": event.id,
+                            "derived": True,
+                            "fact_status": "medical_hypothesis",
+                        },
+                    )
+                )
+                edges.extend(
+                    [
+                        GraphEdge(
+                            phase_id,
+                            boundary_id,
+                            "has_boundary",
+                            list(event.evidence),
+                            confidence,
+                            {"boundary_kind": kind},
+                        ),
+                        GraphEdge(
+                            boundary_id,
+                            event.id,
+                            "grounded_by",
+                            list(event.evidence),
+                            confidence,
+                        ),
+                    ]
+                )
+        phase_count = len(phase_runs)
 
     if instrument_track_source == "appearance_mentions":
         track_count = _append_appearance_instrument_tracks(
@@ -193,6 +203,7 @@ def augment_with_semantic_hypotheses(
             "base_schema_version": graph.schema_version,
             "semantic_layer_version": SEMANTIC_LAYER_VERSION,
             "semantic_hypotheses_used": True,
+            "sequence_interval_projection": interval_projection,
             "semantic_nodes_are_observed_facts": False,
             "instrument_track_source": instrument_track_source,
         }
@@ -212,8 +223,8 @@ def augment_with_semantic_hypotheses(
         "semantic_layer_version": SEMANTIC_LAYER_VERSION,
         "source_hypothesis_count": len(hypotheses),
         "covered_event_count": len(row_by_event),
-        "phase_hypothesis_count": len(phase_runs),
-        "phase_boundary_count": 2 * len(phase_runs),
+        "phase_hypothesis_count": phase_count,
+        "phase_boundary_count": 2 * phase_count,
         "instrument_track_count": track_count,
         "instrument_track_source": instrument_track_source,
         "node_type_counts": dict(sorted(node_counts.items())),
@@ -288,11 +299,30 @@ def retrieve_phase_boundary_instruments(
                 ]
             )
     selected_ids = list(dict.fromkeys(selected_ids))
-    tracks = {
-        edge.source: node_by_id[edge.source]
+    phase_scoped = bool(phase.metadata.get("phase_projection_version"))
+    phase_support = {
+        edge.target: edge.evidence
         for edge in graph.edges
-        if edge.relation == "visible_during" and edge.target in selected_ids
+        if edge.source == phase.id
+        and edge.relation == "derived_from"
+        and node_by_id[edge.target].node_type == "temporal_event"
     }
+    if phase_scoped:
+        selected_ids = [eid for eid in selected_ids if eid in phase_support]
+    tracks = {}
+    track_support = defaultdict(list)
+    for edge in graph.edges:
+        if edge.relation != "visible_during" or edge.target not in selected_ids:
+            continue
+        intervals = (
+            intersect_evidence(edge.evidence, phase_support[edge.target])
+            if phase_scoped
+            else edge.evidence
+        )
+        if phase_scoped and not intervals:
+            continue
+        tracks[edge.source] = node_by_id[edge.source]
+        track_support[edge.source].append(edge.target)
     instruments = sorted(
         (
             {
@@ -313,7 +343,7 @@ def retrieve_phase_boundary_instruments(
                 "supporting_event_ids": [
                     event_id
                     for event_id in node.metadata.get("supporting_event_ids", [])
-                    if event_id in selected_ids
+                    if event_id in track_support[node.id]
                 ],
             }
             for node in tracks.values()
@@ -323,9 +353,12 @@ def retrieve_phase_boundary_instruments(
     evidence = _dedupe_intervals(
         interval
         for event_id in selected_ids
-        for interval in node_by_id[event_id].evidence
+        for interval in (
+            phase_support[event_id] if phase_scoped else node_by_id[event_id].evidence
+        )
     )
     return {
+        "phase_scoped_evidence": phase_scoped,
         "phase_hypothesis_id": phase.id,
         "phase_label": phase.label,
         "phase_match_score": round(score, 4),
@@ -369,7 +402,7 @@ def _append_semantic_instrument_tracks(
     events: Sequence[GraphNode],
     event_position: dict[str, int],
     row_by_event: dict[str, dict[str, Any]],
-    phase_event_membership: dict[str, str],
+    phase_event_membership: dict[str, dict[str, list[EvidenceInterval]]],
     nodes: list[GraphNode],
     edges: list[GraphEdge],
     *,
@@ -447,10 +480,15 @@ def _append_semantic_instrument_tracks(
                         {"basis": basis},
                     )
                 )
-                phase_id = phase_event_membership.get(event.id)
-                if phase_id:
-                    co_occurring_phases[phase_id].extend(event.evidence)
+                for phase_id, windows in phase_event_membership.get(
+                    event.id, {}
+                ).items():
+                    co_occurring_phases[phase_id].extend(
+                        intersect_evidence(event.evidence, windows)
+                    )
             for phase_id, intervals in co_occurring_phases.items():
+                if not intervals:
+                    continue
                 edges.append(
                     GraphEdge(
                         track_id,
@@ -467,7 +505,7 @@ def _append_appearance_instrument_tracks(
     graph: VideoEvidenceGraph,
     events: Sequence[GraphNode],
     event_position: dict[str, int],
-    phase_event_membership: dict[str, str],
+    phase_event_membership: dict[str, dict[str, list[EvidenceInterval]]],
     nodes: list[GraphNode],
     edges: list[GraphEdge],
     *,
@@ -638,10 +676,15 @@ def _append_appearance_instrument_tracks(
                             {"derivation": "appearance_signature_grouping"},
                         )
                     )
-                phase_id = phase_event_membership.get(event.id)
-                if phase_id:
-                    co_occurring_phases[phase_id].extend(event_evidence)
+                for phase_id, windows in phase_event_membership.get(
+                    event.id, {}
+                ).items():
+                    co_occurring_phases[phase_id].extend(
+                        intersect_evidence(event_evidence, windows)
+                    )
             for phase_id, intervals in co_occurring_phases.items():
+                if not intervals:
+                    continue
                 edges.append(
                     GraphEdge(
                         track_id,

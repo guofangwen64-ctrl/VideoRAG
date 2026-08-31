@@ -252,6 +252,8 @@ OPENAI_API_KEY=EMPTY python experiments/evaluate_phase_instrument_reader.py \
 
 逐 event 的局部语义推断之外，v3.1 增加一个独立的全序列阶段中间层。它一次读取同一视频全部按时间排序的 observation-first 描述，只保留 summary、可见器械/物体、动作和状态变化，不读取 `medical_inferences`，也不重新输入视觉帧。模型输出覆盖完整 clip 序列的连续阶段区间；程序严格校验区间有序、无重叠、无缺口，并将区间投影为与现有 temporal event 对齐的 `event_phase_hypotheses.jsonl`。
 
+最新 v3 投影保留来源阶段和边界，按实际相交区间建立阶段与事件的多对多支持关系；不再用整个事件投票覆盖短阶段或 unknown。旧阶段文件可离线重投影到新的 observation v3 图，无需模型推断。命令、兼容边界和验收口径见 [sequence phase 相交投影说明](docs/sequence_phase_projection_v3.md)。
+
 ```bash
 python experiments/infer_sequence_phase_hypotheses.py \
   --descriptions artifacts/vgent_baseline/<run>/descriptions.jsonl \
