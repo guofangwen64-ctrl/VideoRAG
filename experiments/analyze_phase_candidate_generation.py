@@ -168,40 +168,67 @@ def _load_video_index(
 def _compact_report_row(row: dict[str, Any]) -> dict[str, Any]:
     generation = row["candidate_generation"]
     trace_events = row["phase_trace"]["events"]
+    temporal = row["temporal_evidence"]
     return {
         "qa_uid": row["qa_uid"],
         "video_id": row["video_id"],
         "gt_phase": row["gt_phase"],
-        "temporal_evidence": row["temporal_evidence"],
+        "temporal": _compact_temporal(temporal),
         "topk_hit": generation["topk_hit"],
         "top1_hit": generation["top1_hit"],
         "candidate_rank1_hit": generation["candidate_rank1_hit"],
         "best_rank": generation["best_rank"],
         "match_count": generation["match_count"],
         "matched_candidates": [
-            {
-                "rank": item.get("rank"),
-                "label": item.get("label"),
-                "segment_id": item.get("activity_segment_id"),
-                "start_seconds": item.get("start_seconds"),
-                "end_seconds": item.get("end_seconds"),
-                "decision": item.get("decision"),
-                "accepted": item.get("accepted"),
-            }
+            _candidate_summary(item)
             for item in generation["matches"][:3]
         ],
         "trace_source": row["phase_trace"]["source"],
         "trace_event_count": len(trace_events),
         "trace_event_summaries": [
-            {
-                "event_id": item.get("event_id"),
-                "time": item.get("time"),
-                "label": item.get("label"),
-                "supporting_clip_ids": list(item.get("supporting_clip_ids") or [])[:5],
-            }
+            _event_summary(item)
             for item in trace_events[:3]
         ],
     }
+
+
+def _compact_temporal(temporal: dict[str, Any]) -> str:
+    windows = temporal.get("windows") or []
+    if not windows:
+        return f"{temporal.get('method', 'unresolved')}:none"
+    spans = [
+        f"{float(item['start_seconds']):.1f}-{float(item['end_seconds']):.1f}s"
+        for item in windows
+    ]
+    return f"{temporal.get('method', 'unknown')}:{','.join(spans)}"
+
+
+def _candidate_summary(item: dict[str, Any]) -> str:
+    start = item.get("start_seconds")
+    end = item.get("end_seconds")
+    span = (
+        f"{float(start):.1f}-{float(end):.1f}s"
+        if start is not None and end is not None
+        else "unknown"
+    )
+    return (
+        f"rank={item.get('rank')} {item.get('label')} "
+        f"{item.get('activity_segment_id')} {span} "
+        f"{item.get('decision')} accepted={item.get('accepted')}"
+    )
+
+
+def _event_summary(item: dict[str, Any]) -> str:
+    time = item.get("time") or {}
+    start = time.get("start_seconds")
+    end = time.get("end_seconds")
+    span = (
+        f"{float(start):.1f}-{float(end):.1f}s"
+        if start is not None and end is not None
+        else "unknown"
+    )
+    clips = ",".join(str(clip) for clip in list(item.get("supporting_clip_ids") or [])[:5])
+    return f"{item.get('event_id')} {span} {item.get('label')} clips={clips}"
 
 
 def _diagnose_question(

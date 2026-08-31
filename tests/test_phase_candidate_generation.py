@@ -118,3 +118,6 @@ def test_build_report_keeps_heavy_trace_out_of_summary() -> None:
 
     assert "raw_observations" not in str(report)
     assert report["missing_phase_traces"][0]["trace_event_count"] == 1
+    assert report["missing_phase_traces"][0]["trace_event_summaries"] == [
+        "event:v:1 0.0-1.0s grasp clips=c0"
+    ]
